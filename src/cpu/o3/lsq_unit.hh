@@ -105,34 +105,9 @@ class LSQUnit
         bool _valid = false;
 
       public:
-        ~LSQEntry()
-        {
-            if (_request != nullptr) {
-                _request->freeLSQEntry();
-                _request = nullptr;
-            }
-        }
-
-        void
-        clear()
-        {
-            _inst = nullptr;
-            if (_request != nullptr) {
-                _request->freeLSQEntry();
-            }
-            _request = nullptr;
-            _valid = false;
-            _size = 0;
-        }
-
-        void
-        set(const DynInstPtr& new_inst)
-        {
-            assert(!_valid);
-            _inst = new_inst;
-            _valid = true;
-            _size = 0;
-        }
+        ~LSQEntry();
+        void clear();
+        void set(const DynInstPtr& new_inst);
 
         LSQRequest* request() { return _request; }
         void setRequest(LSQRequest* r) { _request = r; }

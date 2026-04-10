@@ -73,6 +73,11 @@ class CPU;
 class IEW;
 class LSQUnit;
 
+// 对比模式支持 - 只使用前向声明
+#ifdef LSQ_COMPARISON_MODE
+class LSQUnitComparison;
+#endif
+
 class LSQ
 {
   public:
@@ -693,6 +698,9 @@ class LSQ
     /** Constructs an LSQ with the given parameters. */
     LSQ(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params);
 
+    /** Destructor. */
+    ~LSQ();
+
     /** Returns the name of the LSQ. */
     std::string name() const;
 
@@ -984,7 +992,11 @@ class LSQ
     DcachePort dcachePort;
 
     /** The LSQ units for individual threads. */
-    std::vector<LSQUnit> thread;
+#ifdef LSQ_COMPARISON_MODE
+    std::vector<std::unique_ptr<LSQUnitComparison>> thread;
+#else
+    std::vector<std::unique_ptr<LSQUnit>> thread;
+#endif
 
     /** Number of Threads. */
     ThreadID numThreads;

@@ -44,6 +44,7 @@
 #include "arch/generic/debugfaults.hh"
 #include "base/str.hh"
 #include "cpu/checker/cpu.hh"
+#include "cpu/o3/cpu.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "cpu/o3/limits.hh"
 #include "cpu/o3/lsq.hh"
@@ -59,6 +60,36 @@ namespace gem5
 
 namespace o3
 {
+
+// LSQEntry 成员函数实现
+LSQUnit::LSQEntry::~LSQEntry()
+{
+    if (_request != nullptr) {
+        _request->freeLSQEntry();
+        _request = nullptr;
+    }
+}
+
+void
+LSQUnit::LSQEntry::clear()
+{
+    _inst = nullptr;
+    if (_request != nullptr) {
+        _request->freeLSQEntry();
+    }
+    _request = nullptr;
+    _valid = false;
+    _size = 0;
+}
+
+void
+LSQUnit::LSQEntry::set(const DynInstPtr& new_inst)
+{
+    assert(!_valid);
+    _inst = new_inst;
+    _valid = true;
+    _size = 0;
+}
 
 LSQUnit::WritebackEvent::WritebackEvent(const DynInstPtr &_inst,
         PacketPtr _pkt, LSQUnit *lsq_ptr)
