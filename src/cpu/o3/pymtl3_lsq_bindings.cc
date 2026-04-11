@@ -426,5 +426,81 @@ pymtl3_get_stat(void* lsq, const std::string &stat_name)
     }
 }
 
+/**
+ * Set DCache callback for PyMTL3 LSQUnitCL.
+ * This callback is called when PyMTL3 makes a DCache access.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t cycle, uint64_t addr, 
+ *                                 uint32_t size, bool is_write,
+ *                                 const std::vector<uint8_t>& data,
+ *                                 const std::string& method_name)
+ */
+void
+pymtl3_set_dcache_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, uint32_t, bool,
+                    const std::vector<uint8_t>&,
+                    const std::string&))
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        // Create a Python callable that wraps the C++ callback
+        py::cpp_function py_callback = 
+            [callback](uint64_t cycle, uint64_t addr, uint32_t size,
+                      bool is_write, py::bytes data,
+                      const std::string& method_name) {
+                // Convert Python bytes to vector<uint8_t>
+                std::string data_str = data.cast<std::string>();
+                std::vector<uint8_t> data_vec(data_str.begin(), data_str.end());
+                
+                // Call C++ callback
+                callback(cycle, addr, size, is_write, data_vec, method_name);
+            };
+        
+        // Set the callback on the wrapper
+        (*wrapper).attr("set_dcache_callback")(py_callback);
+        
+        std::cout << "[LSQComparison] DCache callback set for PyMTL3" << std::endl;
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_dcache_callback: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Get current cycle from PyMTL3 LSQUnitCL.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @return Current cycle.
+ */
+uint64_t
+pymtl3_get_cycle(void* lsq)
+{
+    if (!lsq) {
+        return 0;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        uint64_t cycle = (*wrapper).attr("get_current_cycle")().cast<uint64_t>();
+        return cycle;
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in get_cycle: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+        return 0;
+    }
+}
+
 } // namespace o3
 } // namespace gem5

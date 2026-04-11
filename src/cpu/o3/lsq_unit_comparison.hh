@@ -18,6 +18,7 @@
 
 #include "cpu/o3/lsq_unit.hh"
 #include "cpu/o3/dyn_inst_ptr.hh"
+#include "cpu/o3/mock_dcache.hh"
 #include "mem/packet.hh"
 
 // 编译开关 - 启用对比模式
@@ -46,6 +47,11 @@ int pymtl3_squash(void* lsq, uint64_t squash_sn);
 int pymtl3_num_loads(void* lsq);
 int pymtl3_num_stores(void* lsq);
 uint64_t pymtl3_get_stat(void* lsq, const std::string &stat_name);
+void pymtl3_set_dcache_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, uint32_t, bool,
+                    const std::vector<uint8_t>&,
+                    const std::string&));
+uint64_t pymtl3_get_cycle(void* lsq);
 
 /**
  * LSQUnitComparison - Simplified comparison wrapper
@@ -125,6 +131,18 @@ class LSQUnitComparison : public LSQUnit
     /** Receive retry. */
     void recvRetry();
 
+    /** Try to send a packet to the cache. */
+    bool trySendPacket(bool isLoad, PacketPtr data_pkt);
+
+    /**
+     * Notify that PyMTL3 made a DCache call.
+     * Called from pybind11 callback.
+     * Public to allow access from static callback function.
+     */
+    void notifyPyMTL3DCacheCall(uint64_t cycle, Addr addr, uint32_t size,
+                               bool isWrite, const std::vector<uint8_t>& data,
+                               const std::string& methodName);
+
   private:
     /** PyMTL3 LSQUnitCL handle (nullptr if PyMTL3 is not available) */
     void* pymtl3LSQ;
@@ -134,6 +152,9 @@ class LSQUnitComparison : public LSQUnit
 
     /** Mismatch counter */
     uint64_t mismatchCount;
+
+    /** Mock DCache port for capturing output calls */
+    MockDCachePort* mockDCache;
 
     /**
      * Log a mismatch.
@@ -152,6 +173,16 @@ class LSQUnitComparison : public LSQUnit
      * Compare statistics between implementations.
      */
     void compareStatistics();
+
+    /**
+     * Compare DCache output calls between C++ and PyMTL3.
+     */
+    void compareDCacheCalls();
+
+    // Friend declaration for callback access
+    friend void notify_dcache_call_from_pymtl3(uint64_t, Addr, uint32_t, bool,
+                                               const std::vector<uint8_t>&,
+                                               const std::string&);
 };
 
 #else

@@ -42,6 +42,11 @@
 #ifndef __CPU_O3_LSQ_HH__
 #define __CPU_O3_LSQ_HH__
 
+// 强制启用LSQ对比模式
+#ifndef LSQ_COMPARISON_MODE
+#define LSQ_COMPARISON_MODE 1
+#endif
+
 #include <cassert>
 #include <cstdint>
 #include <list>

@@ -72,6 +72,7 @@ if env['CONF']['BUILD_ISA']:
     Source('lsq.cc')
     Source('lsq_unit.cc')
     Source('lsq_unit_comparison.cc')
+    Source('mock_dcache.cc')
     Source('type_converter.cc')
     Source('pymtl3_lsq_bindings.cc')
     Source('mem_dep_unit.cc')

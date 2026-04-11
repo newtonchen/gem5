@@ -168,8 +168,10 @@ LSQ::LSQ(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params)
     thread.reserve(numThreads);
     for (ThreadID tid = 0; tid < numThreads; tid++) {
 #ifdef LSQ_COMPARISON_MODE
+        std::cerr << "[LSQ] Creating LSQUnitComparison for thread " << tid << std::endl;
         thread.emplace_back(std::make_unique<LSQUnitComparison>(maxLQEntries, maxSQEntries));
 #else
+        std::cerr << "[LSQ] Creating LSQUnit for thread " << tid << std::endl;
         thread.emplace_back(std::make_unique<LSQUnit>(maxLQEntries, maxSQEntries));
 #endif
         thread[tid]->init(cpu, iew_ptr, params, this, tid);
