@@ -508,7 +508,7 @@ pymtl3_get_cycle(void* lsq)
  * @param lsq Pointer to PyMTL3 wrapper instance.
  */
 void
-pymtl3_tick(void* lsq)
+pymtl3_tick(void* lsq, uint64_t gem5_tick)
 {
     if (!lsq) {
         return;
@@ -516,7 +516,7 @@ pymtl3_tick(void* lsq)
 
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("tick")();
+        (*wrapper).attr("tick")(gem5_tick);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in tick: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
