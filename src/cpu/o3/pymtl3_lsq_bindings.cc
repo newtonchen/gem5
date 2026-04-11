@@ -502,5 +502,28 @@ pymtl3_get_cycle(void* lsq)
     }
 }
 
+/**
+ * Tick PyMTL3 LSQUnitCL by one cycle.
+ * This should be called every cycle to keep PyMTL3 in sync with Gem5.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ */
+void
+pymtl3_tick(void* lsq)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("tick")();
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in tick: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
 } // namespace o3
 } // namespace gem5

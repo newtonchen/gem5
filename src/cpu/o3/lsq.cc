@@ -246,6 +246,17 @@ LSQ::tick()
 
     usedLoadPorts = 0;
     usedStorePorts = 0;
+
+#ifdef LSQ_COMPARISON_MODE
+    // Tick PyMTL3 LSQUnitCL to keep it in sync with Gem5
+    // This ensures both models progress at the same rate
+    for (auto& t : thread) {
+        auto* comparisonUnit = dynamic_cast<LSQUnitComparison*>(t.get());
+        if (comparisonUnit && comparisonUnit->getPyMTL3LSQ()) {
+            pymtl3_tick(comparisonUnit->getPyMTL3LSQ());
+        }
+    }
+#endif
 }
 
 bool

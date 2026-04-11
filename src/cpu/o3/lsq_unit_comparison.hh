@@ -52,6 +52,7 @@ void pymtl3_set_dcache_callback(void* lsq,
                     const std::vector<uint8_t>&,
                     const std::string&));
 uint64_t pymtl3_get_cycle(void* lsq);
+void pymtl3_tick(void* lsq);
 
 /**
  * LSQUnitComparison - Simplified comparison wrapper
@@ -142,6 +143,9 @@ class LSQUnitComparison : public LSQUnit
     void notifyPyMTL3DCacheCall(uint64_t cycle, Addr addr, uint32_t size,
                                bool isWrite, const std::vector<uint8_t>& data,
                                const std::string& methodName);
+
+    /** Get PyMTL3 LSQ handle for external tick synchronization */
+    void* getPyMTL3LSQ() const { return pymtl3LSQ; }
 
   private:
     /** PyMTL3 LSQUnitCL handle (nullptr if PyMTL3 is not available) */
