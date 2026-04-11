@@ -166,9 +166,22 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
     // 调用基类实现（Gem5）
     Fault result = LSQUnit::executeStore(inst);
 
-    // 如果 PyMTL3 可用，调用 PyMTL3 实现
+    // 如果 PyMTL3 可用，更新 store 地址并调用 PyMTL3 实现
     if (pymtl3Available && pymtl3LSQ) {
-        // TODO: 调用 PyMTL3 实现并对比结果
+        // Store 执行后，地址和大小已经计算完成
+        // 更新 PyMTL3 中的 store 条目
+        InstSeqNum seq_num = inst->seqNum;
+        Addr ea = inst->effAddr;
+        uint32_t size = inst->effSize;
+        
+        // 调试输出
+        std::cerr << "[LSQComparison-DEBUG] executeStore: sn=" << seq_num 
+                  << ", ea=0x" << std::hex << ea << std::dec
+                  << ", size=" << size << std::endl;
+        
+        // 调用 PyMTL3 的 execute_store 并传递地址和大小
+        pymtl3_execute_store(pymtl3LSQ, seq_num, ea, size);
+        
         compareQueueStates();
         compareStatistics();
     }
@@ -320,21 +333,43 @@ LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
         std::cerr << "[LSQComparison-DEBUG] trySendPacket called, count=" 
                   << sendCount << ", isLoad=" << isLoad 
                   << ", pkt=" << data_pkt << std::endl;
+        if (data_pkt) {
+            std::cerr << "[LSQComparison-DEBUG] Packet details: addr=0x" 
+                      << std::hex << data_pkt->getAddr() << std::dec
+                      << ", size=" << data_pkt->getSize()
+                      << ", isWrite=" << data_pkt->isWrite() << std::endl;
+        }
     }
 
     // 1. 记录当前 tick
     uint64_t callTick = curTick();
 
-    // 2. 记录 C++ 的 DCache 调用（在发送前记录）
+    // 2. 如果是store，更新PyMTL3的地址为物理地址（用于比较）
+    if (!isLoad && data_pkt && pymtl3Available && pymtl3LSQ) {
+        // 从packet中获取物理地址和大小
+        Addr physAddr = data_pkt->getAddr();
+        uint32_t size = data_pkt->getSize();
+        
+        // 尝试从packet的inst获取seq_num
+        // 注意：packet可能不直接包含inst，我们需要其他方式获取
+        // 这里我们暂时使用地址来匹配
+        std::cerr << "[LSQComparison-DEBUG] Store sendTimingReq: physAddr=0x" 
+                  << std::hex << physAddr << std::dec << ", size=" << size << std::endl;
+        
+        // TODO: 更新PyMTL3的store地址为物理地址
+        // 这需要知道是哪个store在发送，可能需要从LSQUnit的状态中获取
+    }
+
+    // 3. 记录 C++ 的 DCache 调用（在发送前记录）
     if (mockDCache && data_pkt) {
         std::cerr << "[LSQComparison-DEBUG] Recording C++ DCache sendTimingReq" << std::endl;
         mockDCache->recordCPCall(callTick, data_pkt, "sendTimingReq");
     }
 
-    // 3. 调用基类实现（Gem5）- 实际发送数据包
+    // 4. 调用基类实现（Gem5）- 实际发送数据包
     bool ret = LSQUnit::trySendPacket(isLoad, data_pkt);
 
-    // 4. 对比 DCache 调用
+    // 5. 对比 DCache 调用
     if (pymtl3Available && mockDCache) {
         compareDCacheCalls();
     }

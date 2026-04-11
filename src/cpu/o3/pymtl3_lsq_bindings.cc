@@ -525,5 +525,31 @@ pymtl3_tick(void* lsq)
     }
 }
 
+/**
+ * Execute a store instruction in PyMTL3 LSQUnitCL.
+ * This should be called after the store address is calculated.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ * @param addr Effective address (physical address after translation).
+ * @param size Access size in bytes.
+ */
+void
+pymtl3_execute_store(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("execute_store_with_addr")(seq_num, addr, size);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in execute_store_with_addr: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
 } // namespace o3
 } // namespace gem5

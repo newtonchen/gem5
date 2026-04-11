@@ -53,6 +53,7 @@ void pymtl3_set_dcache_callback(void* lsq,
                     const std::string&));
 uint64_t pymtl3_get_cycle(void* lsq);
 void pymtl3_tick(void* lsq);
+void pymtl3_execute_store(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
 
 /**
  * LSQUnitComparison - Simplified comparison wrapper
