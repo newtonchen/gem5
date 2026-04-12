@@ -249,12 +249,12 @@ LSQ::tick()
 
 #ifdef LSQ_COMPARISON_MODE
     // Tick PyMTL3 LSQUnitCL to keep it in sync with Gem5
-    // This ensures both models progress at the same rate
-    uint64_t current_tick = curTick();
+    // Call pymtl3_tick() once per cycle to ensure both models
+    // execute the same number of cycles (synchronization by tick count)
     for (auto& t : thread) {
         auto* comparisonUnit = dynamic_cast<LSQUnitComparison*>(t.get());
         if (comparisonUnit && comparisonUnit->getPyMTL3LSQ()) {
-            pymtl3_tick(comparisonUnit->getPyMTL3LSQ(), current_tick);
+            pymtl3_tick(comparisonUnit->getPyMTL3LSQ());
         }
     }
 #endif

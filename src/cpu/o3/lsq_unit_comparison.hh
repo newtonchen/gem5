@@ -97,7 +97,7 @@ uint64_t pymtl3_translate_address(void* lsq, uint64_t vaddr);
 void pymtl3_set_tlb_callback(void* lsq, uint64_t (*callback)(uint64_t));
 
 uint64_t pymtl3_get_cycle(void* lsq);
-void pymtl3_tick(void* lsq, uint64_t gem5_tick);
+void pymtl3_tick(void* lsq);
 int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
 void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
