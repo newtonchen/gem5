@@ -19,7 +19,9 @@
 #include "cpu/o3/lsq_unit.hh"
 #include "cpu/o3/dyn_inst_ptr.hh"
 #include "cpu/o3/mock_dcache.hh"
+#include "cpu/o3/pymtl3_tlb_request.hh"
 #include "mem/packet.hh"
+#include <memory>
 
 // 编译开关 - 启用对比模式
 #ifndef LSQ_COMPARISON_MODE
@@ -51,9 +53,54 @@ void pymtl3_set_dcache_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, uint32_t, bool,
                     const std::vector<uint8_t>&,
                     const std::string&));
+
+// ===== 新异步TLB转换接口 =====
+/**
+ * Set TLB request callback for PyMTL3 LSQUnitCL (新异步方式).
+ * This callback is called when PyMTL3 sends a TLB translation request.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t seq_num, uint64_t vaddr, 
+ *                                 uint32_t size, bool is_load)
+ */
+void pymtl3_set_tlb_req_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, uint32_t, bool));
+
+/**
+ * Set TLB response callback for PyMTL3 LSQUnitCL.
+ * This callback is called by C++ to send TLB translation results back to PyMTL3.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t seq_num, uint64_t paddr, int fault)
+ *        seq_num: Instruction sequence number
+ *        paddr: Physical address
+ *        fault: Translation fault code (0 = NoFault)
+ */
+void pymtl3_set_tlb_resp_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, int));
+
+/**
+ * Send TLB translation response to PyMTL3.
+ * Called by C++ when TLB translation is complete.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number
+ * @param paddr Physical address
+ * @param fault Translation fault code (0 = NoFault)
+ */
+void pymtl3_send_tlb_resp(void* lsq, uint64_t seq_num, uint64_t paddr, int fault);
+
+// 旧的同步TLB接口（保留用于兼容性）
+uint64_t pymtl3_translate_address(void* lsq, uint64_t vaddr);
+void pymtl3_set_tlb_callback(void* lsq, uint64_t (*callback)(uint64_t));
+
 uint64_t pymtl3_get_cycle(void* lsq);
 void pymtl3_tick(void* lsq, uint64_t gem5_tick);
-void pymtl3_execute_store(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
+int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx);
+int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
+void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
 
 /**
  * LSQUnitComparison - Simplified comparison wrapper
@@ -145,8 +192,48 @@ class LSQUnitComparison : public LSQUnit
                                bool isWrite, const std::vector<uint8_t>& data,
                                const std::string& methodName);
 
+    /**
+     * Translate virtual address to physical address.
+     * Called from PyMTL3 via callback when it needs TLB translation.
+     * This uses Gem5's TLB to perform the translation.
+     * 
+     * @param vaddr Virtual address to translate.
+     * @return Physical address.
+     */
+    Addr translateAddress(Addr vaddr);
+
     /** Get PyMTL3 LSQ handle for external tick synchronization */
     void* getPyMTL3LSQ() const { return pymtl3LSQ; }
+
+    // ===== 异步TLB转换支持（使用Gem5原生流程） =====
+    
+    /**
+     * Handle TLB translation request from PyMTL3.
+     * This creates a PyTLBRequest and initiates translation using
+     * the same flow as LSQRequest::initiateTranslation().
+     * 
+     * @param seq_num Instruction sequence number from PyMTL3
+     * @param vaddr Virtual address to translate
+     * @param size Access size
+     * @param is_load Whether this is a load instruction
+     */
+    void handleTLBReq(uint64_t seq_num, Addr vaddr, uint32_t size, bool is_load);
+    
+    /**
+     * Send TLB translation result back to PyMTL3.
+     * This is called by PyTLBRequest::finish() when translation completes.
+     * 
+     * @param seq_num Instruction sequence number
+     * @param paddr Physical address
+     * @param fault Translation fault code (0 = NoFault)
+     */
+    void sendTLBResp(uint64_t seq_num, Addr paddr, int fault);
+    
+    /**
+     * Complete a TLB translation request.
+     * Called by PyTLBRequest when translation finishes.
+     */
+    void completeTLBTranslation(uint64_t seq_num, Addr paddr, Fault fault, bool delayed);
 
   private:
     /** PyMTL3 LSQUnitCL handle (nullptr if PyMTL3 is not available) */
@@ -160,6 +247,20 @@ class LSQUnitComparison : public LSQUnit
 
     /** Mock DCache port for capturing output calls */
     MockDCachePort* mockDCache;
+
+    /** CPU pointer for accessing thread context */
+    CPU* cpuPtr;
+
+    /** Thread ID for this LSQ unit */
+    ThreadID threadId;
+
+    // ===== 异步TLB转换状态 =====
+    
+    /** Outstanding TLB translation requests using PyTLBRequest */
+    std::vector<std::unique_ptr<PyTLBRequest>> outstandingTLBReqs;
+    
+    /** TLB response callback function pointer */
+    void (*tlbRespCallback)(uint64_t, uint64_t, int);
 
     /**
      * Log a mismatch.

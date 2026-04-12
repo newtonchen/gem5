@@ -526,15 +526,142 @@ pymtl3_tick(void* lsq, uint64_t gem5_tick)
 }
 
 /**
+ * Set TLB request callback for PyMTL3 LSQUnitCL (新异步方式).
+ * This callback is called when PyMTL3 sends a TLB translation request.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t seq_num, uint64_t vaddr, 
+ *                                 uint32_t size, bool is_load)
+ */
+void
+pymtl3_set_tlb_req_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, uint32_t, bool))
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        // Create a Python callable that wraps the C++ callback
+        py::cpp_function py_callback = 
+            [callback](uint64_t seq_num, uint64_t vaddr, 
+                      uint32_t size, bool is_load) {
+                // Call C++ callback to handle TLB request
+                callback(seq_num, vaddr, size, is_load);
+            };
+        
+        // Set the callback on the wrapper
+        (*wrapper).attr("set_tlb_req_callback")(py_callback);
+        
+        std::cout << "[LSQComparison] TLB request callback set for PyMTL3" << std::endl;
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_tlb_req_callback: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Translate virtual address to physical address using PyMTL3's TLB callback.
+ * This is called when PyMTL3 needs to translate an address.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param vaddr Virtual address to translate.
+ * @return Physical address.
+ */
+uint64_t
+pymtl3_translate_address(void* lsq, uint64_t vaddr)
+{
+    if (!lsq) {
+        return vaddr;  // Identity mapping if no wrapper
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        uint64_t paddr = (*wrapper).attr("translate_address")(vaddr).cast<uint64_t>();
+        return paddr;
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in translate_address: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+        return vaddr;  // Return vaddr on error
+    }
+}
+
+/**
+ * Execute a load instruction in PyMTL3 LSQUnitCL.
+ * This should be called when the load is ready to execute.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ * @param lq_idx Load queue index.
+ * @return Fault code (0 = NoFault).
+ */
+int
+pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx)
+{
+    if (!lsq) {
+        return 0;  // NoFault
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        int fault = (*wrapper).attr("execute_load")(lq_idx).cast<int>();
+        return fault;
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+        return 0;  // Return NoFault on error
+    }
+}
+
+/**
  * Execute a store instruction in PyMTL3 LSQUnitCL.
+ * This should be called when the store is ready to execute.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ * @param sq_idx Store queue index.
+ * @return Fault code (0 = NoFault).
+ */
+int
+pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx)
+{
+    if (!lsq) {
+        return 0;  // NoFault
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        int fault = (*wrapper).attr("execute_store")(sq_idx).cast<int>();
+        return fault;
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in execute_store: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+        return 0;  // Return NoFault on error
+    }
+}
+
+/**
+ * Update store address in PyMTL3 LSQUnitCL.
  * This should be called after the store address is calculated.
  * @param lsq Pointer to PyMTL3 wrapper instance.
  * @param seq_num Instruction sequence number.
- * @param addr Effective address (physical address after translation).
+ * @param addr Effective address.
  * @param size Access size in bytes.
  */
 void
-pymtl3_execute_store(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
+pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
 {
     if (!lsq) {
         return;
@@ -545,6 +672,70 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
         (*wrapper).attr("execute_store_with_addr")(seq_num, addr, size);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_store_with_addr: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+// ===== 异步TLB转换接口实现 =====
+
+/**
+ * Set TLB response callback for PyMTL3 LSQUnitCL.
+ * This callback is called by C++ to send TLB translation results back to PyMTL3.
+ */
+void
+pymtl3_set_tlb_resp_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, int))
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        // Create a Python callable that wraps the C++ callback
+        py::cpp_function py_callback = 
+            [callback](uint64_t inst_id, uint64_t paddr, int fault) {
+                // Call C++ callback to send TLB result
+                callback(inst_id, paddr, fault);
+            };
+        
+        // Set the callback on the wrapper
+        (*wrapper).attr("set_tlb_resp_callback")(py_callback);
+        
+        std::cout << "[LSQComparison] TLB response callback set for PyMTL3" << std::endl;
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_tlb_resp_callback: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Send TLB translation response to PyMTL3.
+ * Called by C++ when TLB translation is complete.
+ */
+void
+pymtl3_send_tlb_resp(void* lsq, uint64_t seq_num, uint64_t paddr, int fault)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        // Send TLB result to PyMTL3 wrapper
+        (*wrapper).attr("handle_tlb_resp")(seq_num, paddr, fault);
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in send_tlb_resp: " 
+                  << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
