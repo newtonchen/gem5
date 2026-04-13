@@ -254,8 +254,17 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
             std::cerr << "[LSQComparison-DEBUG] executeLoad: sn=" << seq_num 
                       << " already executed, skipping fault comparison" << std::endl;
         } else {
-            // 在调用 execute_load 之前，先更新 PyMTL3 中指令的 fault 状态
+            // 在调用 execute_load 之前，先更新 PyMTL3 中指令的地址和 fault 状态
             // 这确保了即使 fault 是在 insert 之后设置的，也能正确同步
+            
+            // 更新 load 地址（如果 effAddrValid）
+            if (inst->effAddrValid()) {
+                pymtl3_update_load_addr(pymtl3LSQ, seq_num, inst->effAddr, inst->effSize);
+                std::cerr << "[LSQComparison-DEBUG] executeLoad: sn=" << seq_num 
+                          << " updated load addr=0x" << std::hex << inst->effAddr 
+                          << ", size=" << std::dec << inst->effSize << std::endl;
+            }
+            
             int fault = (inst->getFault() != NoFault) ? 1 : 0;
             pymtl3_update_load_inst_fault(pymtl3LSQ, lq_idx, fault, seq_num);
             
@@ -513,10 +522,22 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
         }
     }
 
-    // 3. 调用基类实现（Gem5）
+    // 3. 发送 DCache 响应给 PyMTL3（如果是 Load 且需要写回）
+    if (pymtl3Available && pymtl3LSQ && inst->isLoad() && needWB && !isSquashed) {
+        // 获取响应数据
+        const uint8_t* data = pkt->getConstPtr<uint8_t>();
+        uint32_t data_size = pkt->getSize();
+        
+        std::cerr << "[LSQComparison-DEBUG] Sending DCache resp to PyMTL3: sn=" 
+                  << inst->seqNum << ", size=" << data_size << std::endl;
+        
+        pymtl3_send_dcache_resp(pymtl3LSQ, inst->seqNum, data, data_size);
+    }
+
+    // 4. 调用基类实现（Gem5）
     LSQUnit::completeDataAccess(pkt);
 
-    // 4. 对比 DCache 调用
+    // 5. 对比 DCache 调用
     if (pymtl3Available && mockDCache) {
         compareDCacheCalls();
     }

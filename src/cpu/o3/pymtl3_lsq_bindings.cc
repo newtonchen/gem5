@@ -503,6 +503,43 @@ pymtl3_set_dcache_callback(void* lsq,
 }
 
 /**
+ * Send DCache response to PyMTL3 LSQUnitCL.
+ * This should be called when DCache response is received (completeDataAccess).
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ * @param data Response data pointer.
+ * @param data_size Response data size in bytes.
+ */
+void
+pymtl3_send_dcache_resp(void* lsq, uint64_t seq_num,
+                        const uint8_t* data, uint32_t data_size)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        // Convert data to Python bytes
+        py::bytes data_bytes;
+        if (data && data_size > 0) {
+            data_bytes = py::bytes(reinterpret_cast<const char*>(data), data_size);
+        }
+        
+        // Call Python method to send DCache response
+        (*wrapper).attr("send_dcache_resp")(seq_num, data_bytes, data_size);
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in send_dcache_resp: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
  * Get current cycle from PyMTL3 LSQUnitCL.
  * @param lsq Pointer to PyMTL3 wrapper instance.
  * @return Current cycle.
@@ -644,7 +681,8 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx)
 
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
-        int fault = (*wrapper).attr("execute_load")(lq_idx).cast<int>();
+        // 传递 seq_num 和 lq_idx，让 Python 端通过 seq_num 找到正确的 entry
+        int fault = (*wrapper).attr("execute_load")(seq_num, lq_idx).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;
@@ -680,6 +718,32 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx)
             PyErr_Print();
         }
         return 0;  // Return NoFault on error
+    }
+}
+
+/**
+ * Update load address in PyMTL3 LSQUnitCL.
+ * This should be called before execute_load to set the effective address.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ * @param addr Effective address.
+ * @param size Access size in bytes.
+ */
+void
+pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("update_load_addr")(seq_num, addr, size);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in update_load_addr: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
     }
 }
 
