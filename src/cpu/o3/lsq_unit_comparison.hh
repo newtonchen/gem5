@@ -100,7 +100,8 @@ uint64_t pymtl3_get_cycle(void* lsq);
 void pymtl3_tick(void* lsq);
 int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
-void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
+void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size,
+                               const uint8_t* data, uint32_t data_size, bool is_all_zeros);
 void pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num);
 void pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num);
 

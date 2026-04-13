@@ -286,8 +286,31 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
                   << ", ea=0x" << std::hex << ea << std::dec
                   << ", size=" << size << std::endl;
         
-        // 1. 更新 PyMTL3 中的 store 地址
-        pymtl3_update_store_addr(pymtl3LSQ, seq_num, ea, size);
+        // 获取 Store 数据
+        const uint8_t* store_data = nullptr;
+        bool is_all_zeros = false;
+        std::cerr << "[LSQComparison-DEBUG] Store queue check: sq_idx=" << sq_idx
+                  << ", storeQueue.size()=" << storeQueue.size()
+                  << ", storeQueue.capacity()=" << storeQueue.capacity() << std::endl;
+        if (sq_idx >= 0 && sq_idx < storeQueue.capacity()) {
+            auto& sq_entry = storeQueue[sq_idx];
+            std::cerr << "[LSQComparison-DEBUG] SQ entry: sq_idx=" << sq_idx
+                      << ", valid=" << sq_entry.valid() << std::endl;
+            if (sq_entry.valid()) {
+                store_data = reinterpret_cast<const uint8_t*>(sq_entry.data());
+                is_all_zeros = sq_entry.isAllZeros();
+                // Print first byte of data for debugging
+                unsigned int first_byte = is_all_zeros ? 0 : (unsigned int)(unsigned char)store_data[0];
+                std::cerr << "[LSQComparison-DEBUG] Store data: sq_idx=" << sq_idx
+                          << ", data_ptr=" << (void*)store_data
+                          << ", is_all_zeros=" << is_all_zeros
+                          << ", first_byte=0x" << std::hex << first_byte << std::dec << std::endl;
+            }
+        }
+        
+        // 1. 更新 PyMTL3 中的 store 地址和数据
+        pymtl3_update_store_addr(pymtl3LSQ, seq_num, ea, size, 
+                                 store_data, size, is_all_zeros);
         
         // 2. 调用 PyMTL3 的 execute_store
         int py_fault = pymtl3_execute_store(pymtl3LSQ, seq_num, sq_idx);

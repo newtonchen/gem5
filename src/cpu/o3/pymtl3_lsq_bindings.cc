@@ -684,15 +684,19 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx)
 }
 
 /**
- * Update store address in PyMTL3 LSQUnitCL.
+ * Update store address and data in PyMTL3 LSQUnitCL.
  * This should be called after the store address is calculated.
  * @param lsq Pointer to PyMTL3 wrapper instance.
  * @param seq_num Instruction sequence number.
  * @param addr Effective address.
  * @param size Access size in bytes.
+ * @param data Store data pointer.
+ * @param data_size Store data size in bytes.
+ * @param is_all_zeros Whether the store writes all zeros.
  */
 void
-pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
+pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size,
+                         const uint8_t* data, uint32_t data_size, bool is_all_zeros)
 {
     if (!lsq) {
         return;
@@ -700,7 +704,19 @@ pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t si
 
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("execute_store_with_addr")(seq_num, addr, size);
+        
+        // Convert data to Python bytes
+        py::bytes data_bytes;
+        if (data && data_size > 0) {
+            data_bytes = py::bytes(reinterpret_cast<const char*>(data), data_size);
+            std::cerr << "[LSQComparison-DEBUG] pymtl3_update_store_addr: data_size=" << data_size
+                      << ", first_byte=0x" << std::hex << (int)data[0] << std::dec << std::endl;
+        } else {
+            std::cerr << "[LSQComparison-DEBUG] pymtl3_update_store_addr: no data, data=" << (void*)data
+                      << ", data_size=" << data_size << std::endl;
+        }
+        
+        (*wrapper).attr("execute_store_with_addr")(seq_num, addr, size, data_bytes, is_all_zeros);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_store_with_addr: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
