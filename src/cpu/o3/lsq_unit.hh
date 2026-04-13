@@ -254,7 +254,7 @@ class LSQUnit
 
     /** Completes the data access that has been returned from the
      * memory system. */
-    void completeDataAccess(PacketPtr pkt);
+    virtual void completeDataAccess(PacketPtr pkt);
 
     /** Squashes all instructions younger than a specific sequence number. */
     void squash(const InstSeqNum &squashed_num);
@@ -355,8 +355,9 @@ class LSQUnit
     /** Reset the LSQ state */
     void resetState();
 
+  protected:
     /** Writes back the instruction, sending it to IEW. */
-    void writeback(const DynInstPtr &inst, PacketPtr pkt);
+    virtual void writeback(const DynInstPtr &inst, PacketPtr pkt);
 
     /** Try to finish a previously blocked write back attempt */
     void writebackBlockedStore();

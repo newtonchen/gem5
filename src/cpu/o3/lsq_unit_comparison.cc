@@ -85,8 +85,18 @@ static void pymtl3TLBRespCallback(uint64_t seq_num, uint64_t paddr, int fault)
 {
     if (g_currentLSQUnitForTLB && g_currentLSQUnitForTLB->getPyMTL3LSQ()) {
         // 调用 pybind11 函数将结果发送给 PyMTL3
-        pymtl3_send_tlb_resp(g_currentLSQUnitForTLB->getPyMTL3LSQ(), 
+        pymtl3_send_tlb_resp(g_currentLSQUnitForTLB->getPyMTL3LSQ(),
                               seq_num, paddr, fault);
+    }
+}
+
+// 静态回调函数，用于接收 PyMTL3 的 writeback 调用通知
+static void pymtl3WritebackCallback(uint64_t cycle, uint64_t seqNum,
+                                    bool hasData, const std::vector<uint8_t>& data,
+                                    int fault)
+{
+    if (g_currentLSQUnitComparison) {
+        g_currentLSQUnitComparison->notifyPyMTL3WritebackCall(cycle, seqNum, hasData, data, fault);
     }
 }
 
@@ -137,6 +147,10 @@ LSQUnitComparison::init(CPU *cpu_ptr, IEW *iew_ptr,
             
             // 保存回调函数指针到成员变量
             tlbRespCallback = pymtl3TLBRespCallback;
+            
+            // 设置 writeback 回调函数，用于 writeback 对比
+            std::cout << "[LSQComparison] Setting up writeback callback..." << std::endl;
+            pymtl3_set_writeback_callback(pymtl3LSQ, pymtl3WritebackCallback);
         } else {
             std::cout << "[LSQComparison] PyMTL3 LSQ not available, using Gem5 only" << std::endl;
         }
@@ -380,6 +394,45 @@ LSQUnitComparison::writebackStores()
 }
 
 void
+LSQUnitComparison::writeback(const DynInstPtr &inst, PacketPtr pkt)
+{
+    // 调试输出 - 确认方法被调用
+    std::cerr << "[LSQComparison-DEBUG] writeback called: sn=" << inst->seqNum
+              << ", isExecuted=" << inst->isExecuted()
+              << ", isLoad=" << inst->isLoad() << std::endl;
+    
+    // 记录 C++ 端的 writeback 调用
+    WritebackRecord record;
+    record.cycle = curTick();
+    record.seqNum = inst->seqNum;
+    record.fault = (inst->fault != NoFault) ? 1 : 0;
+    
+    // 如果是 load 且有数据，复制数据
+    if (inst->isLoad() && pkt && pkt->hasData()) {
+        record.hasData = true;
+        const uint8_t* dataPtr = pkt->getPtr<uint8_t>();
+        uint32_t dataSize = pkt->getSize();
+        record.data.assign(dataPtr, dataPtr + dataSize);
+    } else {
+        record.hasData = false;
+    }
+    
+    cppWritebackCalls.push(record);
+    
+    // 调试输出
+    std::cerr << "[LSQComparison-DEBUG] C++ writeback: sn=" << inst->seqNum
+              << ", fault=" << record.fault
+              << ", hasData=" << record.hasData
+              << ", cycle=" << record.cycle << std::endl;
+    
+    // 调用基类实现
+    LSQUnit::writeback(inst, pkt);
+    
+    // 对比 writeback 调用
+    compareWritebackCalls();
+}
+
+void
 LSQUnitComparison::squash(const InstSeqNum &squashed_num)
 {
     // 调用基类实现（Gem5）
@@ -423,9 +476,22 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
     // 0. 调试输出 - 确认方法被调用
     static int callCount = 0;
     callCount++;
+    
+    // 获取 request 和 inst
+    LSQRequest *request = dynamic_cast<LSQRequest *>(pkt->senderState);
+    DynInstPtr inst = request->instruction();
+    bool needWB = request->needWBToRegister();
+    PacketPtr mainPkt = request->mainPacket();
+    bool isSquashed = inst->isSquashed();
+    
     if (callCount <= 10) {
         std::cerr << "[LSQComparison-DEBUG] completeDataAccess called, count=" 
-                  << callCount << ", pkt=" << pkt << std::endl;
+                  << callCount << ", pkt=" << pkt 
+                  << ", isLoad=" << inst->isLoad()
+                  << ", isStore=" << inst->isStore()
+                  << ", needWBToRegister=" << needWB
+                  << ", isSquashed=" << isSquashed
+                  << ", mainPacket=" << mainPkt << std::endl;
     }
 
     // 1. 记录当前 cycle (使用 PyMTL3 的 cycle，与 PyMTL3 同步)
@@ -459,6 +525,14 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
 bool
 LSQUnitComparison::recvTimingResp(PacketPtr pkt)
 {
+    // 调试输出
+    static int respCount = 0;
+    respCount++;
+    if (respCount <= 10) {
+        std::cerr << "[LSQComparison-DEBUG] recvTimingResp called, count=" 
+                  << respCount << ", pkt=" << pkt << std::endl;
+    }
+    
     // 调用基类实现（Gem5）
     return LSQUnit::recvTimingResp(pkt);
 }
@@ -816,6 +890,94 @@ LSQUnitComparison::compareDCacheCalls()
                          bestReason.c_str()));
         }
     }
+}
+
+void
+LSQUnitComparison::notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
+                                             bool hasData, const std::vector<uint8_t>& data,
+                                             int fault)
+{
+    WritebackRecord record;
+    record.cycle = cycle;
+    record.seqNum = seqNum;
+    record.hasData = hasData;
+    record.data = data;
+    record.fault = fault;
+    
+    pymtl3WritebackCalls.push(record);
+    
+    // 调试输出
+    std::cerr << "[LSQComparison-DEBUG] PyMTL3 writeback: sn=" << seqNum
+              << ", fault=" << fault
+              << ", hasData=" << hasData
+              << ", cycle=" << cycle << std::endl;
+}
+
+void
+LSQUnitComparison::compareWritebackCalls()
+{
+    // 检查是否有待对比的调用
+    if (cppWritebackCalls.empty() && pymtl3WritebackCalls.empty()) {
+        return;
+    }
+    
+    // 如果只有 PyMTL3 有调用，记录不匹配
+    if (cppWritebackCalls.empty() && !pymtl3WritebackCalls.empty()) {
+        WritebackRecord pymtl3Call = pymtl3WritebackCalls.front();
+        pymtl3WritebackCalls.pop();
+        logMismatch("writeback call",
+            csprintf("PyMTL3 called writeback for sn=%lu but C++ didn't",
+                     pymtl3Call.seqNum));
+        return;
+    }
+    
+    // 如果只有 C++ 有调用，等待 PyMTL3 的调用
+    if (!cppWritebackCalls.empty() && pymtl3WritebackCalls.empty()) {
+        return;
+    }
+    
+    // 双方都有调用，进行对比
+    WritebackRecord cppCall = cppWritebackCalls.front();
+    cppWritebackCalls.pop();
+    WritebackRecord pymtl3Call = pymtl3WritebackCalls.front();
+    pymtl3WritebackCalls.pop();
+    
+    // 比较序列号
+    if (cppCall.seqNum != pymtl3Call.seqNum) {
+        logMismatch("writeback call",
+            csprintf("seqNum mismatch: C++=%lu, PyMTL3=%lu",
+                     cppCall.seqNum, pymtl3Call.seqNum));
+        return;
+    }
+    
+    // 比较 fault 状态
+    if (cppCall.fault != pymtl3Call.fault) {
+        logMismatch("writeback call",
+            csprintf("fault mismatch for sn=%lu: C++=%d, PyMTL3=%d",
+                     cppCall.seqNum, cppCall.fault, pymtl3Call.fault));
+        return;
+    }
+    
+    // 比较数据（如果都有数据）
+    if (cppCall.hasData && pymtl3Call.hasData) {
+        if (cppCall.data.size() != pymtl3Call.data.size()) {
+            logMismatch("writeback call",
+                csprintf("data size mismatch for sn=%lu: C++=%zu, PyMTL3=%zu",
+                         cppCall.seqNum, cppCall.data.size(), pymtl3Call.data.size()));
+            return;
+        }
+        for (size_t i = 0; i < cppCall.data.size(); i++) {
+            if (cppCall.data[i] != pymtl3Call.data[i]) {
+                logMismatch("writeback call",
+                    csprintf("data mismatch for sn=%lu at byte %zu: C++=0x%x, PyMTL3=0x%x",
+                             cppCall.seqNum, i, cppCall.data[i], pymtl3Call.data[i]));
+                return;
+            }
+        }
+    }
+    
+    // 所有检查通过
+    std::cerr << "[LSQComparison] Writeback calls match for sn=" << cppCall.seqNum << std::endl;
 }
 
 // ===== 异步TLB转换实现 =====

@@ -22,6 +22,7 @@
 #include "cpu/o3/pymtl3_tlb_request.hh"
 #include "mem/packet.hh"
 #include <memory>
+#include <queue>
 
 // 编译开关 - 启用对比模式
 #ifndef LSQ_COMPARISON_MODE
@@ -105,6 +106,20 @@ void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32
 void pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num);
 void pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num);
 
+// ===== Writeback 回调函数 =====
+/**
+ * Set writeback callback for PyMTL3 LSQUnitCL.
+ * This callback is called when PyMTL3 sends a writeback.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t cycle, uint64_t seqNum,
+ *                                 bool hasData, const std::vector<uint8_t>& data,
+ *                                 int fault)
+ */
+void pymtl3_set_writeback_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, bool, const std::vector<uint8_t>&, int));
+
 /**
  * LSQUnitComparison - Simplified comparison wrapper
  *
@@ -186,6 +201,9 @@ class LSQUnitComparison : public LSQUnit
     /** Try to send a packet to the cache. */
     bool trySendPacket(bool isLoad, PacketPtr data_pkt);
 
+    /** Writes back the instruction, sending it to IEW. */
+    void writeback(const DynInstPtr &inst, PacketPtr pkt);
+
     /**
      * Notify that PyMTL3 made a DCache call.
      * Called from pybind11 callback.
@@ -238,6 +256,15 @@ class LSQUnitComparison : public LSQUnit
      */
     void completeTLBTranslation(uint64_t seq_num, Addr paddr, Fault fault, bool delayed);
 
+    /**
+     * Notify that PyMTL3 made a writeback call.
+     * Called from pybind11 callback.
+     * Public to allow access from static callback function.
+     */
+    void notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
+                                   bool hasData, const std::vector<uint8_t>& data,
+                                   int fault);
+
   private:
     /** PyMTL3 LSQUnitCL handle (nullptr if PyMTL3 is not available) */
     void* pymtl3LSQ;
@@ -253,6 +280,25 @@ class LSQUnitComparison : public LSQUnit
 
     /** CPU pointer for accessing thread context */
     CPU* cpuPtr;
+
+    // ===== Writeback 记录和对比 =====
+    
+    /** Writeback record structure */
+    struct WritebackRecord {
+        uint64_t cycle;
+        uint64_t seqNum;
+        bool hasData;
+        std::vector<uint8_t> data;
+        int fault;  // 0 = NoFault, 1 = Fault
+        
+        WritebackRecord() : cycle(0), seqNum(0), hasData(false), fault(0) {}
+    };
+    
+    /** C++ writeback calls queue */
+    std::queue<WritebackRecord> cppWritebackCalls;
+    
+    /** PyMTL3 writeback calls queue */
+    std::queue<WritebackRecord> pymtl3WritebackCalls;
 
     /** Thread ID for this LSQ unit */
     ThreadID threadId;
@@ -287,6 +333,11 @@ class LSQUnitComparison : public LSQUnit
      * Compare DCache output calls between C++ and PyMTL3.
      */
     void compareDCacheCalls();
+
+    /**
+     * Compare writeback calls between C++ and PyMTL3.
+     */
+    void compareWritebackCalls();
 
     // Friend declaration for callback access
     friend void notify_dcache_call_from_pymtl3(uint64_t, Addr, uint32_t, bool,

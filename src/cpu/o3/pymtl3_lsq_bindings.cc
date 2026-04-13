@@ -779,6 +779,54 @@ pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_nu
     }
 }
 
+// ===== Writeback 回调接口实现 =====
+
+/**
+ * Set writeback callback for PyMTL3 LSQUnitCL.
+ * This callback is called when PyMTL3 sends a writeback.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t cycle, uint64_t seqNum,
+ *                                 bool hasData, const std::vector<uint8_t>& data,
+ *                                 int fault)
+ */
+void
+pymtl3_set_writeback_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, bool, const std::vector<uint8_t>&, int))
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        // Create a Python callable that wraps the C++ callback
+        py::cpp_function py_callback = 
+            [callback](uint64_t cycle, uint64_t seqNum, bool hasData, 
+                      py::bytes data, int fault) {
+                // Convert Python bytes to C++ vector
+                std::string data_str = data;
+                std::vector<uint8_t> data_vec(data_str.begin(), data_str.end());
+                // Call C++ callback
+                callback(cycle, seqNum, hasData, data_vec, fault);
+            };
+        
+        // Set the callback on the wrapper
+        (*wrapper).attr("set_writeback_callback")(py_callback);
+        
+        std::cout << "[LSQComparison] Writeback callback set for PyMTL3" << std::endl;
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_writeback_callback: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
 // ===== 异步TLB转换接口实现 =====
 
 /**
