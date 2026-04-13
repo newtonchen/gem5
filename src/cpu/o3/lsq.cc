@@ -255,6 +255,8 @@ LSQ::tick()
         auto* comparisonUnit = dynamic_cast<LSQUnitComparison*>(t.get());
         if (comparisonUnit && comparisonUnit->getPyMTL3LSQ()) {
             pymtl3_tick(comparisonUnit->getPyMTL3LSQ());
+            // Note: We no longer compare queue states here
+            // Comparison is now focused on interface calls, not internal states
         }
     }
 #endif

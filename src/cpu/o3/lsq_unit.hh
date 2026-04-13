@@ -235,11 +235,11 @@ class LSQUnit
     void checkSnoop(PacketPtr pkt);
 
     /** Executes a load instruction. */
-    Fault executeLoad(const DynInstPtr &inst);
+    virtual Fault executeLoad(const DynInstPtr &inst);
 
-    Fault executeLoad(int lq_idx) { panic("Not implemented"); return NoFault; }
+    virtual Fault executeLoad(int lq_idx) { panic("Not implemented"); return NoFault; }
     /** Executes a store instruction. */
-    Fault executeStore(const DynInstPtr &inst);
+    virtual Fault executeStore(const DynInstPtr &inst);
 
     /** Commits the head load. */
     void commitLoad();

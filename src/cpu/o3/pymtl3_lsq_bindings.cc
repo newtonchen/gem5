@@ -154,10 +154,11 @@ create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries)
  * @param pc Instruction PC.
  * @param ea Effective address.
  * @param size Access size.
+ * @param fault Fault status from earlier pipeline stages (0 = NoFault).
  * @return True if successful.
  */
 bool
-pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size)
+pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault)
 {
     if (!lsq) {
         return false;
@@ -166,10 +167,21 @@ pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
 
-        // 创建 DynInst (通过 Python)
+        // 创建 DynInst (通过 Python) - 使用关键字参数
         py::module dyn_inst_module = py::module::import("gem5_pymtl3.common.dyn_inst");
         py::object DynInst = dyn_inst_module.attr("DynInst");
-        py::object inst = DynInst(seq_num, pc, ea, size, true, false);
+        
+        // 使用关键字参数创建 DynInst，确保正确设置字段
+        py::dict kwargs;
+        kwargs["seq_num"] = seq_num;
+        kwargs["pc"] = pc;
+        kwargs["eff_addr"] = ea;
+        kwargs["eff_size"] = size;
+        kwargs["is_load"] = true;
+        kwargs["is_store"] = false;
+        kwargs["fault"] = fault;
+        
+        py::object inst = DynInst(**kwargs);
 
         // 调用 insert_load
         bool result = (*wrapper).attr("insert_load")(inst).cast<bool>();
@@ -191,10 +203,11 @@ pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32
  * @param pc Instruction PC.
  * @param ea Effective address.
  * @param size Access size.
+ * @param fault Fault status from earlier pipeline stages (0 = NoFault).
  * @return True if successful.
  */
 bool
-pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size)
+pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault)
 {
     if (!lsq) {
         return false;
@@ -203,10 +216,21 @@ pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint3
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
 
-        // 创建 DynInst
+        // 创建 DynInst (通过 Python) - 使用关键字参数
         py::module dyn_inst_module = py::module::import("gem5_pymtl3.common.dyn_inst");
         py::object DynInst = dyn_inst_module.attr("DynInst");
-        py::object inst = DynInst(seq_num, pc, ea, size, false, true);
+        
+        // 使用关键字参数创建 DynInst，确保正确设置字段
+        py::dict kwargs;
+        kwargs["seq_num"] = seq_num;
+        kwargs["pc"] = pc;
+        kwargs["eff_addr"] = ea;
+        kwargs["eff_size"] = size;
+        kwargs["is_load"] = false;
+        kwargs["is_store"] = true;
+        kwargs["fault"] = fault;
+        
+        py::object inst = DynInst(**kwargs);
 
         // 调用 insert_store
         bool result = (*wrapper).attr("insert_store")(inst).cast<bool>();
@@ -435,13 +459,14 @@ pymtl3_get_stat(void* lsq, const std::string &stat_name)
  *        Signature: void callback(uint64_t cycle, uint64_t addr, 
  *                                 uint32_t size, bool is_write,
  *                                 const std::vector<uint8_t>& data,
- *                                 const std::string& method_name)
+ *                                 const std::string& method_name,
+ *                                 uint64_t seq_num)
  */
 void
 pymtl3_set_dcache_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, uint32_t, bool,
                     const std::vector<uint8_t>&,
-                    const std::string&))
+                    const std::string&, uint64_t))
 {
     if (!lsq) {
         return;
@@ -454,13 +479,13 @@ pymtl3_set_dcache_callback(void* lsq,
         py::cpp_function py_callback = 
             [callback](uint64_t cycle, uint64_t addr, uint32_t size,
                       bool is_write, py::bytes data,
-                      const std::string& method_name) {
+                      const std::string& method_name, uint64_t seq_num) {
                 // Convert Python bytes to vector<uint8_t>
                 std::string data_str = data.cast<std::string>();
                 std::vector<uint8_t> data_vec(data_str.begin(), data_str.end());
                 
-                // Call C++ callback
-                callback(cycle, addr, size, is_write, data_vec, method_name);
+                // Call C++ callback with seq_num
+                callback(cycle, addr, size, is_write, data_vec, method_name, seq_num);
             };
         
         // Set the callback on the wrapper
@@ -678,6 +703,60 @@ pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t si
         (*wrapper).attr("execute_store_with_addr")(seq_num, addr, size);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_store_with_addr: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Update load instruction fault status in PyMTL3 LSQUnitCL.
+ * This is called before execute_load to sync fault state from Gem5.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param lq_idx Load queue index.
+ * @param fault Fault status (0 = NoFault, 1 = Fault).
+ * @param seq_num Instruction sequence number (for matching).
+ */
+void
+pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("update_load_inst_fault")(lq_idx, fault, seq_num);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in update_load_inst_fault: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Update store instruction fault status in PyMTL3 LSQUnitCL.
+ * This is called before execute_store to sync fault state from Gem5.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param sq_idx Store queue index.
+ * @param fault Fault status (0 = NoFault, 1 = Fault).
+ * @param seq_num Instruction sequence number (for matching).
+ */
+void
+pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        // For now, stores don't need special fault handling as they use different mechanism
+        // This is a placeholder for future implementation
+        (void)wrapper; (void)sq_idx; (void)fault; (void)seq_num;  // Suppress unused warnings
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in update_store_inst_fault: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }

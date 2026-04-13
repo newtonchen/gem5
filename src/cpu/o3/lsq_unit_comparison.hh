@@ -39,8 +39,8 @@ namespace o3
 // pybind11 绑定函数前向声明 - 只在对比模式启用时声明
 void init_pymtl3_module();
 void* create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries);
-bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size);
-bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size);
+bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault);
+bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault);
 int pymtl3_execute_load(void* lsq, int lq_idx);
 int pymtl3_execute_store(void* lsq, int sq_idx);
 void* pymtl3_commit_load(void* lsq);
@@ -52,7 +52,7 @@ uint64_t pymtl3_get_stat(void* lsq, const std::string &stat_name);
 void pymtl3_set_dcache_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, uint32_t, bool,
                     const std::vector<uint8_t>&,
-                    const std::string&));
+                    const std::string&, uint64_t));
 
 // ===== 新异步TLB转换接口 =====
 /**
@@ -101,6 +101,8 @@ void pymtl3_tick(void* lsq);
 int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
 void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
+void pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num);
+void pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num);
 
 /**
  * LSQUnitComparison - Simplified comparison wrapper
@@ -190,7 +192,7 @@ class LSQUnitComparison : public LSQUnit
      */
     void notifyPyMTL3DCacheCall(uint64_t cycle, Addr addr, uint32_t size,
                                bool isWrite, const std::vector<uint8_t>& data,
-                               const std::string& methodName);
+                               const std::string& methodName, uint64_t seqNum = 0);
 
     /**
      * Translate virtual address to physical address.

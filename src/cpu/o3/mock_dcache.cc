@@ -25,7 +25,8 @@ MockDCachePort::~MockDCachePort()
 
 void
 MockDCachePort::recordCPCall(uint64_t cycle, PacketPtr pkt,
-                             const std::string& methodName)
+                             const std::string& methodName,
+                             uint64_t seqNum)
 {
     DCacheCallRecord record;
     record.cycle = cycle;
@@ -33,6 +34,7 @@ MockDCachePort::recordCPCall(uint64_t cycle, PacketPtr pkt,
     record.size = pkt->getSize();
     record.isWrite = pkt->isWrite();
     record.methodName = methodName;
+    record.seqNum = seqNum;
 
     // Copy data for writes
     if (pkt->isWrite() && pkt->hasData()) {
@@ -46,7 +48,8 @@ MockDCachePort::recordCPCall(uint64_t cycle, PacketPtr pkt,
 void
 MockDCachePort::recordPyMTL3Call(uint64_t cycle, Addr addr, uint32_t size,
                                  bool isWrite, const std::vector<uint8_t>& data,
-                                 const std::string& methodName)
+                                 const std::string& methodName,
+                                 uint64_t seqNum)
 {
     DCacheCallRecord record;
     record.cycle = cycle;
@@ -55,6 +58,7 @@ MockDCachePort::recordPyMTL3Call(uint64_t cycle, Addr addr, uint32_t size,
     record.isWrite = isWrite;
     record.data = data;
     record.methodName = methodName;
+    record.seqNum = seqNum;
 
     pymtl3Calls.push(record);
 }
@@ -109,9 +113,20 @@ MockDCachePort::compareCalls(const DCacheCallRecord& cppCall,
                              const DCacheCallRecord& pymtl3Call,
                              std::string& reason)
 {
+    // Compare seqNum first - this is the most accurate way to match calls
+    // If both have non-zero seqNum, they must match
+    if (cppCall.seqNum != 0 && pymtl3Call.seqNum != 0) {
+        if (cppCall.seqNum != pymtl3Call.seqNum) {
+            reason = csprintf("seqNum mismatch: C++=%lu, PyMTL3=%lu",
+                             cppCall.seqNum, pymtl3Call.seqNum);
+            return false;
+        }
+        // seqNum matches, continue with other checks
+    }
+
     // Compare cycle - allow some tolerance for timing differences
-    // C++ and PyMTL3 may have different cache port arbitration delays
-    const uint64_t cycleTolerance = 1000; // Allow 1000 tick difference
+    // Both C++ and PyMTL3 now use synchronized cycle counts
+    const uint64_t cycleTolerance = 5; // Allow 5 cycle difference for port arbitration delays
     if (cppCall.cycle > pymtl3Call.cycle + cycleTolerance ||
         pymtl3Call.cycle > cppCall.cycle + cycleTolerance) {
         reason = csprintf("cycle mismatch: C++=%lu, PyMTL3=%lu (tolerance=%lu)",
@@ -192,8 +207,11 @@ MockDCachePort::callToString(const DCacheCallRecord& call)
        << "cycle=" << call.cycle
        << ", addr=0x" << std::hex << call.addr << std::dec
        << ", size=" << call.size
-       << ", isWrite=" << (call.isWrite ? "true" : "false")
-       << ")";
+       << ", isWrite=" << (call.isWrite ? "true" : "false");
+    if (call.seqNum != 0) {
+        ss << ", sn=" << call.seqNum;
+    }
+    ss << ")";
     return ss.str();
 }
 

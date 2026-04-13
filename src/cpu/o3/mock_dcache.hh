@@ -36,9 +36,10 @@ struct DCacheCallRecord
     bool isWrite;             // true for write, false for read
     std::vector<uint8_t> data; // Data (for writes)
     std::string methodName;   // Method name (e.g., "completeDataAccess")
+    uint64_t seqNum;          // Instruction sequence number for matching
 
     DCacheCallRecord()
-        : cycle(0), addr(0), size(0), isWrite(false), methodName("")
+        : cycle(0), addr(0), size(0), isWrite(false), methodName(""), seqNum(0)
     {}
 };
 
@@ -56,9 +57,11 @@ class MockDCachePort
      * @param cycle Current cycle
      * @param pkt Packet containing call information
      * @param methodName Name of the calling method
+     * @param seqNum Instruction sequence number (optional)
      */
     void recordCPCall(uint64_t cycle, PacketPtr pkt,
-                     const std::string& methodName);
+                     const std::string& methodName,
+                     uint64_t seqNum = 0);
 
     /**
      * Record a call from PyMTL3 LSQUnitCL
@@ -68,10 +71,12 @@ class MockDCachePort
      * @param isWrite Write or read
      * @param data Data bytes (for writes)
      * @param methodName Name of the calling method
+     * @param seqNum Instruction sequence number (optional)
      */
     void recordPyMTL3Call(uint64_t cycle, Addr addr, uint32_t size,
                          bool isWrite, const std::vector<uint8_t>& data,
-                         const std::string& methodName);
+                         const std::string& methodName,
+                         uint64_t seqNum = 0);
 
     /**
      * Get the next recorded C++ call
