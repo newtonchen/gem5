@@ -38,6 +38,7 @@ LSQUnitComparison::LSQUnitComparison(uint32_t lqEntries, uint32_t sqEntries)
       mismatchCount(0),
       mockDCache(nullptr),
       mockTLB(nullptr),
+      mockIQ(nullptr),
       cpuPtr(nullptr),
       threadId(0),
       outstandingTLBReqs(),
@@ -60,6 +61,12 @@ LSQUnitComparison::~LSQUnitComparison()
     if (mockTLB) {
         delete mockTLB;
         mockTLB = nullptr;
+    }
+
+    // 清理 Mock IQ 端口
+    if (mockIQ) {
+        delete mockIQ;
+        mockIQ = nullptr;
     }
 
     // PyMTL3 LSQ 的清理在 pymtl3_lsq_bindings.cc 中处理
@@ -127,6 +134,11 @@ LSQUnitComparison::init(CPU *cpu_ptr, IEW *iew_ptr,
     // 创建 Mock TLB 端口
     if (!mockTLB) {
         mockTLB = new MockTLBPort();
+    }
+
+    // 创建 Mock IQ 端口
+    if (!mockIQ) {
+        mockIQ = new MockIQPort();
     }
 
     // 尝试初始化 PyMTL3 LSQUnitCL
@@ -976,6 +988,50 @@ LSQUnitComparison::recordPyMTL3TLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
     if (mockTLB) {
         mockTLB->recordPyMTL3TLBReq(cycle, vaddr, size, isLoad, seqNum);
     }
+}
+
+void
+LSQUnitComparison::recordPyMTL3Replay(uint64_t cycle, uint64_t seqNum)
+{
+    if (mockIQ) {
+        mockIQ->recordPyMTL3Replay(cycle, seqNum);
+    }
+}
+
+void
+LSQUnitComparison::recordPyMTL3Reschedule(uint64_t cycle, uint64_t seqNum)
+{
+    if (mockIQ) {
+        mockIQ->recordPyMTL3Reschedule(cycle, seqNum);
+    }
+}
+
+void
+LSQUnitComparison::handleReplayReq(uint64_t seqNum)
+{
+    uint64_t callCycle = curTick();
+    std::cerr << "[LSQComparison-IQ] handleReplayReq: sn=" << seqNum << std::endl;
+
+    // 记录 C++ 的 replay 调用
+    if (mockIQ) {
+        mockIQ->recordCPReplay(callCycle, seqNum);
+    }
+
+    // 注意：不实际驱动 gem5，只做记录和对比
+}
+
+void
+LSQUnitComparison::handleRescheduleReq(uint64_t seqNum)
+{
+    uint64_t callCycle = curTick();
+    std::cerr << "[LSQComparison-IQ] handleRescheduleReq: sn=" << seqNum << std::endl;
+
+    // 记录 C++ 的 reschedule 调用
+    if (mockIQ) {
+        mockIQ->recordCPReschedule(callCycle, seqNum);
+    }
+
+    // 注意：不实际驱动 gem5，只做记录和对比
 }
 
 // 全局回调函数，供 pybind11 调用

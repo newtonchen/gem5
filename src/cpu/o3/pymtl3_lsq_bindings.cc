@@ -31,6 +31,10 @@ static bool interpreter_was_initialized_by_us = false;
 static py::module* gem5_pymtl3_module = nullptr;
 static py::object* py_wrapper_class = nullptr;
 
+// 全局 LSQUnitComparison 实例指针，用于回调函数访问
+class LSQUnitComparison;
+static LSQUnitComparison* g_currentLSQUnitComparison = nullptr;
+
 /**
  * Get the project root directory.
  * Tries different methods to find the project root.
@@ -785,6 +789,68 @@ pymtl3_record_pymtl3_tlb_call(void* lsq, uint64_t seq_num, uint64_t vaddr,
 
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in record_pymtl3_tlb_call: "
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Record a replay call from PyMTL3 LSQUnitCL.
+ * This is called from Python when PyMTL3 wants to replay an instruction.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ */
+void
+pymtl3_record_replay_call(void* lsq, uint64_t seq_num)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        if (!g_currentLSQUnitComparison) {
+            std::cerr << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
+            return;
+        }
+
+        g_currentLSQUnitComparison->recordPyMTL3Replay(curTick(), seq_num);
+
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in record_replay_call: "
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Record a reschedule call from PyMTL3 LSQUnitCL.
+ * This is called from Python when PyMTL3 wants to reschedule an instruction.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ */
+void
+pymtl3_record_reschedule_call(void* lsq, uint64_t seq_num)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        if (!g_currentLSQUnitComparison) {
+            std::cerr << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
+            return;
+        }
+
+        g_currentLSQUnitComparison->recordPyMTL3Reschedule(curTick(), seq_num);
+
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in record_reschedule_call: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();

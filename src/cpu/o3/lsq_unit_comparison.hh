@@ -20,6 +20,7 @@
 #include "cpu/o3/dyn_inst_ptr.hh"
 #include "cpu/o3/mock_dcache.hh"
 #include "cpu/o3/mock_tlb.hh"
+#include "cpu/o3/mock_iq.hh"
 #include "cpu/o3/pymtl3_tlb_request.hh"
 #include "mem/packet.hh"
 #include <memory>
@@ -266,6 +267,50 @@ class LSQUnitComparison : public LSQUnit
                                    bool hasData, const std::vector<uint8_t>& data,
                                    int fault);
 
+    // ===== IQ Replay/Reschedule 记录和对比 =====
+
+    /**
+     * Record a replay call from PyMTL3.
+     * Called from Python via pymtl3_record_replay_call.
+     * Public to allow access from static callback function.
+     */
+    void recordPyMTL3Replay(uint64_t cycle, uint64_t seqNum);
+
+    /**
+     * Record a reschedule call from PyMTL3.
+     * Called from Python via pymtl3_record_reschedule_call.
+     * Public to allow access from static callback function.
+     */
+    void recordPyMTL3Reschedule(uint64_t cycle, uint64_t seqNum);
+
+    /**
+     * Handle replay request from PyMTL3.
+     * This is called when PyMTL3 wants to replay an instruction.
+     * Just records and compares, doesn't actually drive gem5.
+     */
+    void handleReplayReq(uint64_t seqNum);
+
+    /**
+     * Handle reschedule request from PyMTL3.
+     * This is called when PyMTL3 wants to reschedule an instruction.
+     * Just records and compares, doesn't actually drive gem5.
+     */
+    void handleRescheduleReq(uint64_t seqNum);
+
+    /**
+     * Compare and drive TLB response to PyMTL3.
+     * Called when C++ TLB translation completes.
+     */
+    void compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int fault);
+
+    /**
+     * Record a TLB request from PyMTL3.
+     * Called from Python via pymtl3_record_pymtl3_tlb_call.
+     * Public to allow access from static callback function.
+     */
+    void recordPyMTL3TLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
+                            bool isLoad, uint64_t seqNum);
+
   private:
     /** PyMTL3 LSQUnitCL handle (nullptr if PyMTL3 is not available) */
     void* pymtl3LSQ;
@@ -281,6 +326,9 @@ class LSQUnitComparison : public LSQUnit
 
     /** Mock TLB port for capturing TLB translation calls */
     MockTLBPort* mockTLB;
+
+    /** Mock IQ port for capturing replay/reschedule calls */
+    MockIQPort* mockIQ;
 
     /** CPU pointer for accessing thread context */
     CPU* cpuPtr;
@@ -311,22 +359,9 @@ class LSQUnitComparison : public LSQUnit
     
     /** Outstanding TLB translation requests using PyTLBRequest */
     std::vector<std::unique_ptr<PyTLBRequest>> outstandingTLBReqs;
-    
+
     /** TLB response callback function pointer */
     void (*tlbRespCallback)(uint64_t, uint64_t, int);
-
-    /**
-     * Compare and drive TLB response to PyMTL3.
-     * Called when C++ TLB translation completes.
-     */
-    void compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int fault);
-
-    /**
-     * Record a TLB request from PyMTL3.
-     * Called from Python via pymtl3_record_pymtl3_tlb_call.
-     */
-    void recordPyMTL3TLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
-                            bool isLoad, uint64_t seqNum);
 
     /**
      * Log a mismatch.
