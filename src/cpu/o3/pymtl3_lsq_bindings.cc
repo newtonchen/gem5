@@ -505,6 +505,90 @@ pymtl3_set_dcache_callback(void* lsq,
 }
 
 /**
+ * Set TLB response callback for PyMTL3 LSQUnitCL.
+ * This callback is called when PyMTL3 sends a TLB request.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t seq_num, uint64_t vaddr,
+ *                                 uint32_t size, bool is_load,
+ *                                 const std::string& method_name,
+ *                                 uint64_t paddr, int fault)
+ */
+void
+pymtl3_set_tlb_resp_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, uint32_t, bool,
+                    const std::string&, uint64_t, int))
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+
+        // Create a Python callable that wraps the C++ callback
+        py::cpp_function py_callback =
+            [callback](uint64_t seq_num, uint64_t vaddr, uint32_t size,
+                      bool is_load, const std::string& method_name,
+                      uint64_t paddr, int fault) {
+                // Call C++ callback
+                callback(seq_num, vaddr, size, is_load, method_name, paddr, fault);
+            };
+
+        // Set the callback on the wrapper
+        (*wrapper).attr("set_tlb_resp_callback")(py_callback);
+
+        std::cout << "[LSQComparison] TLB resp callback set for PyMTL3" << std::endl;
+
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_tlb_resp_callback: "
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Record a TLB call from PyMTL3.
+ * Called by Python wrapper when PyMTL3 makes a TLB translation request.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance (py::object*).
+ * @param seq_num Instruction sequence number.
+ * @param vaddr Virtual address.
+ * @param size Access size.
+ * @param is_load True for load, False for store.
+ * @param method_name Method name ('translateReq' or 'translateResp').
+ * @param paddr Physical address (for response).
+ * @param fault Fault status.
+ */
+void
+pymtl3_record_tlb_call(void* lsq, uint64_t seq_num, uint64_t vaddr,
+                        uint32_t size, bool is_load, const std::string& method_name,
+                        uint64_t paddr, int fault)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+
+        // Call the wrapper's record_tlb_call method
+        (*wrapper).attr("record_tlb_call")(seq_num, vaddr, size, is_load,
+                                           method_name, paddr, fault);
+
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in record_tlb_call: "
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
  * Send DCache response to PyMTL3 LSQUnitCL.
  * This should be called when DCache response is received (completeDataAccess).
  * @param lsq Pointer to PyMTL3 wrapper instance.
@@ -663,6 +747,48 @@ pymtl3_translate_address(void* lsq, uint64_t vaddr)
             PyErr_Print();
         }
         return vaddr;  // Return vaddr on error
+    }
+}
+
+/**
+ * Record a TLB call from PyMTL3 LSQUnitCL.
+ * This is called from Python when PyMTL3 makes a TLB translation request.
+ * The call is recorded in MockTLBPort for comparison.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param seq_num Instruction sequence number.
+ * @param vaddr Virtual address.
+ * @param size Access size.
+ * @param is_load True for load, False for store.
+ * @param method_name Method name ('translateReq').
+ */
+void
+pymtl3_record_pymtl3_tlb_call(void* lsq, uint64_t seq_num, uint64_t vaddr,
+                                uint32_t size, bool is_load,
+                                const std::string& method_name)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        // Get the current LSQUnitComparison instance from global
+        if (!g_currentLSQUnitComparison) {
+            std::cerr << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
+            return;
+        }
+
+        if (method_name == "translateReq") {
+            g_currentLSQUnitComparison->recordPyMTL3TLBReq(
+                curTick(), vaddr, size, is_load, seq_num);
+        }
+
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in record_pymtl3_tlb_call: "
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
     }
 }
 

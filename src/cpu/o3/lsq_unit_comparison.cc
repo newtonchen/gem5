@@ -37,6 +37,7 @@ LSQUnitComparison::LSQUnitComparison(uint32_t lqEntries, uint32_t sqEntries)
       pymtl3Available(false),
       mismatchCount(0),
       mockDCache(nullptr),
+      mockTLB(nullptr),
       cpuPtr(nullptr),
       threadId(0),
       outstandingTLBReqs(),
@@ -53,6 +54,12 @@ LSQUnitComparison::~LSQUnitComparison()
     if (mockDCache) {
         delete mockDCache;
         mockDCache = nullptr;
+    }
+
+    // 清理 Mock TLB 端口
+    if (mockTLB) {
+        delete mockTLB;
+        mockTLB = nullptr;
     }
 
     // PyMTL3 LSQ 的清理在 pymtl3_lsq_bindings.cc 中处理
@@ -115,6 +122,11 @@ LSQUnitComparison::init(CPU *cpu_ptr, IEW *iew_ptr,
     // 创建 Mock DCache 端口（在 init 中创建，确保对象已完全构造）
     if (!mockDCache) {
         mockDCache = new MockDCachePort();
+    }
+
+    // 创建 Mock TLB 端口
+    if (!mockTLB) {
+        mockTLB = new MockTLBPort();
     }
 
     // 尝试初始化 PyMTL3 LSQUnitCL
@@ -818,13 +830,19 @@ LSQUnitComparison::notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
 // ===== 异步TLB转换实现 =====
 
 void
-LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr, 
+LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
                                  uint32_t size, bool is_load)
 {
+    uint64_t callCycle = curTick();
     std::cerr << "[LSQComparison-TLB] handleTLBReq: sn=" << seq_num
               << ", vaddr=0x" << std::hex << vaddr << std::dec
               << ", size=" << size << ", is_load=" << is_load << std::endl;
-    
+
+    // 记录 C++ TLB 请求
+    if (mockTLB) {
+        mockTLB->recordCPTLBReq(callCycle, vaddr, size, is_load, seq_num);
+    }
+
     // 获取 ThreadContext 和 MMU
     if (!cpuPtr) {
         std::cerr << "[LSQComparison-TLB] ERROR: CPU pointer not available" << std::endl;
@@ -879,18 +897,21 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
 }
 
 void
-LSQUnitComparison::completeTLBTranslation(uint64_t seq_num, Addr paddr, 
+LSQUnitComparison::completeTLBTranslation(uint64_t seq_num, Addr paddr,
                                            Fault fault, bool delayed)
 {
+    uint64_t callCycle = curTick();
     std::cerr << "[LSQComparison-TLB] completeTLBTranslation: sn=" << seq_num
               << ", paddr=0x" << std::hex << paddr << std::dec
               << ", fault=" << (fault == NoFault ? "NoFault" : "Fault")
               << ", delayed=" << delayed << std::endl;
-    
-    // 发送结果给 PyMTL3
+
+    // 记录 C++ TLB resp
     int fault_code = (fault == NoFault) ? 0 : 1;
-    sendTLBResp(seq_num, paddr, fault_code);
-    
+    if (mockTLB) {
+        mockTLB->recordCPTLBResp(callCycle, seq_num, paddr, fault_code);
+    }
+
     // 从 outstanding 列表中移除（如果还在的话）
     for (auto it = outstandingTLBReqs.begin(); it != outstandingTLBReqs.end(); ++it) {
         if ((*it)->getSeqNum() == seq_num) {
@@ -898,6 +919,40 @@ LSQUnitComparison::completeTLBTranslation(uint64_t seq_num, Addr paddr,
             break;
         }
     }
+
+    // 尝试对比并驱动 PyMTL3
+    if (mockTLB && pymtl3Available) {
+        compareAndDriveTLBResp(seq_num, paddr, fault_code);
+    }
+}
+
+void
+LSQUnitComparison::compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int fault)
+{
+    // 检查是否有等待的 PyMTL3 TLB resp
+    TLBCallRecord pymtl3Resp;
+    if (!mockTLB->getNextPyMTL3TLBResp(pymtl3Resp)) {
+        std::cerr << "[LSQComparison-TLB] No PyMTL3 TLB resp queued for sn=" << seq_num << std::endl;
+        return;
+    }
+
+    std::cerr << "[LSQComparison-TLB] Comparing TLB resp for sn=" << seq_num << std::endl;
+
+    // 对比 PyMTL3 resp 和 C++ resp
+    std::string reason;
+    TLBCallRecord cppResp;
+    cppResp.seqNum = seq_num;
+    cppResp.paddr = paddr;
+    cppResp.fault = fault;
+    cppResp.methodName = "translateResp";
+
+    if (!MockTLBPort::compareCalls(cppResp, pymtl3Resp, reason)) {
+        std::cerr << "[LSQComparison-TLB] Mismatch in TLB resp: " << reason << std::endl;
+        logMismatch("TLB.resp", reason);
+    }
+
+    // 驱动 PyMTL3
+    sendTLBResp(seq_num, paddr, fault);
 }
 
 void
@@ -906,11 +961,20 @@ LSQUnitComparison::sendTLBResp(uint64_t seq_num, Addr paddr, int fault)
     std::cerr << "[LSQComparison-TLB] sendTLBResp: sn=" << seq_num
               << ", paddr=0x" << std::hex << paddr << std::dec
               << ", fault=" << fault << std::endl;
-    
+
     if (tlbRespCallback) {
         tlbRespCallback(seq_num, paddr, fault);
     } else {
         std::cerr << "[LSQComparison-TLB] Warning: tlbRespCallback not set" << std::endl;
+    }
+}
+
+void
+LSQUnitComparison::recordPyMTL3TLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
+                                      bool isLoad, uint64_t seqNum)
+{
+    if (mockTLB) {
+        mockTLB->recordPyMTL3TLBReq(cycle, vaddr, size, isLoad, seqNum);
     }
 }
 
