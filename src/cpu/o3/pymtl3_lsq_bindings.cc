@@ -13,7 +13,9 @@
 #include <pybind11/stl.h>
 #include <iostream>
 #include <string>
-#include <cstdlib>  // for getenv
+#include <cstdlib>  // for getenv>
+
+#include "cpu/o3/lsq_unit_comparison.hh"
 
 namespace py = pybind11;
 
@@ -494,7 +496,7 @@ pymtl3_set_dcache_callback(void* lsq,
         std::cout << "[LSQComparison] DCache callback set for PyMTL3" << std::endl;
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_dcache_callback: " 
+        std::cerr << "[LSQComparison] Python error in set_dcache_callback: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();

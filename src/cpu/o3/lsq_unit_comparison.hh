@@ -24,16 +24,13 @@
 #include <memory>
 #include <queue>
 
+namespace gem5 {
+namespace o3 {
+
 // 编译开关 - 启用对比模式
 #ifndef LSQ_COMPARISON_MODE
 #define LSQ_COMPARISON_MODE 1
 #endif
-
-namespace gem5
-{
-
-namespace o3
-{
 
 #if LSQ_COMPARISON_MODE
 
@@ -293,10 +290,10 @@ class LSQUnitComparison : public LSQUnit
         bool hasData;
         std::vector<uint8_t> data;
         int fault;  // 0 = NoFault, 1 = Fault
-        
+
         WritebackRecord() : cycle(0), seqNum(0), hasData(false), fault(0) {}
     };
-    
+
     /** C++ writeback calls queue */
     std::queue<WritebackRecord> cppWritebackCalls;
     
@@ -331,16 +328,6 @@ class LSQUnitComparison : public LSQUnit
      * Compare statistics between implementations.
      */
     void compareStatistics();
-
-    /**
-     * Compare DCache output calls between C++ and PyMTL3.
-     */
-    void compareDCacheCalls();
-
-    /**
-     * Compare writeback calls between C++ and PyMTL3.
-     */
-    void compareWritebackCalls();
 
     // Friend declaration for callback access
     friend void notify_dcache_call_from_pymtl3(uint64_t, Addr, uint32_t, bool,

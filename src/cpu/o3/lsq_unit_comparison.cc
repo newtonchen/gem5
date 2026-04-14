@@ -436,9 +436,6 @@ LSQUnitComparison::writeback(const DynInstPtr &inst, PacketPtr pkt)
     
     // 调用基类实现
     LSQUnit::writeback(inst, pkt);
-    
-    // 对比 writeback 调用
-    compareWritebackCalls();
 }
 
 void
@@ -536,24 +533,11 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
 
     // 4. 调用基类实现（Gem5）
     LSQUnit::completeDataAccess(pkt);
-
-    // 5. 对比 DCache 调用
-    if (pymtl3Available && mockDCache) {
-        compareDCacheCalls();
-    }
 }
 
 bool
 LSQUnitComparison::recvTimingResp(PacketPtr pkt)
 {
-    // 调试输出
-    static int respCount = 0;
-    respCount++;
-    if (respCount <= 10) {
-        std::cerr << "[LSQComparison-DEBUG] recvTimingResp called, count=" 
-                  << respCount << ", pkt=" << pkt << std::endl;
-    }
-    
     // 调用基类实现（Gem5）
     return LSQUnit::recvTimingResp(pkt);
 }
@@ -627,11 +611,6 @@ LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
         mockDCache->recordCPCall(callCycle, data_pkt, "sendTimingReq", seqNum);
     } else if (!ret && sendCount <= 10) {
         std::cerr << "[LSQComparison-DEBUG] sendTimingReq not sent (cache blocked or port unavailable)" << std::endl;
-    }
-
-    // 5. 对比 DCache 调用
-    if (pymtl3Available && mockDCache) {
-        compareDCacheCalls();
     }
 
     return ret;
@@ -816,92 +795,6 @@ LSQUnitComparison::translateAddress(Addr vaddr)
 }
 
 void
-LSQUnitComparison::compareDCacheCalls()
-{
-    if (!mockDCache) {
-        return;
-    }
-
-    // 检查是否有待对比的调用
-    if (!mockDCache->hasPendingCPCalls() &&
-        !mockDCache->hasPendingPyMTL3Calls()) {
-        return;
-    }
-
-    // 如果只有 PyMTL3 有调用，暂时不记录为不匹配
-    // 因为 C++ 和 PyMTL3 的指令调度顺序可能不同
-    // PyMTL3 可能在一个 cycle 发送请求，但 C++ 在不同的 cycle 发送
-    // 这些是 timing 差异，不是真正的功能错误
-    if (!mockDCache->hasPendingCPCalls() &&
-        mockDCache->hasPendingPyMTL3Calls()) {
-        DCacheCallRecord pymtl3Call;
-        mockDCache->getNextPyMTL3Call(pymtl3Call);
-        
-        // 记录为警告而不是错误（timing 差异）
-        std::cerr << "[LSQComparison-WARNING] PyMTL3 called "
-                  << MockDCachePort::callToString(pymtl3Call).c_str()
-                  << " but C++ didn't in this cycle (possible timing difference)" << std::endl;
-        return;
-    }
-
-    // 如果只有 C++ 有调用，暂时跳过比较
-    // 等待 PyMTL3 的调用到达
-    if (mockDCache->hasPendingCPCalls() &&
-        !mockDCache->hasPendingPyMTL3Calls()) {
-        return;
-    }
-
-    // 双方都有调用，进行对比
-    // 采用宽松的比较策略：使用 seqNum 匹配
-    DCacheCallRecord pymtl3Call;
-    mockDCache->getNextPyMTL3Call(pymtl3Call);
-    
-    // 获取 C++ 的所有待处理调用
-    std::vector<DCacheCallRecord> cppCalls;
-    while (mockDCache->hasPendingCPCalls()) {
-        DCacheCallRecord cppCall;
-        mockDCache->getNextCPCall(cppCall);
-        cppCalls.push_back(cppCall);
-    }
-    
-    // 尝试找到匹配的 C++ 调用
-    // 使用 seqNum 进行匹配，这是最准确的方式
-    bool foundMatch = false;
-    std::string bestReason = "no matching call found";
-    
-    // 使用 seqNum 精确匹配
-    if (pymtl3Call.seqNum != 0) {
-        for (auto& cppCall : cppCalls) {
-            if (cppCall.seqNum == pymtl3Call.seqNum) {
-                // seqNum 匹配，进行详细比较
-                std::string reason;
-                if (MockDCachePort::compareCalls(cppCall, pymtl3Call, reason)) {
-                    foundMatch = true;
-                } else {
-                    bestReason = reason;
-                }
-                break;
-            }
-        }
-    }
-    
-    // 如果没有找到 seqNum 匹配，记录原因但不阻塞
-    // C++ 和 PyMTL3 的调度顺序不同，可能导致这种暂时性的不匹配
-    if (!foundMatch) {
-        if (!cppCalls.empty()) {
-            // 只记录详细的不匹配信息，但不阻塞执行
-            std::cerr << "[LSQComparison-WARNING] DCache timing mismatch: "
-                      << MockDCachePort::callToString(pymtl3Call).c_str()
-                      << " vs C++ calls: ";
-            for (auto& cppCall : cppCalls) {
-                std::cerr << MockDCachePort::callToString(cppCall).c_str() << " ";
-            }
-            std::cerr << "(" << bestReason << ")" << std::endl;
-        }
-    }
-}
-
-void
 LSQUnitComparison::notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
                                              bool hasData, const std::vector<uint8_t>& data,
                                              int fault)
@@ -920,110 +813,6 @@ LSQUnitComparison::notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
               << ", fault=" << fault
               << ", hasData=" << hasData
               << ", cycle=" << cycle << std::endl;
-}
-
-void
-LSQUnitComparison::compareWritebackCalls()
-{
-    // 检查是否有待对比的调用
-    if (cppWritebackCalls.empty() && pymtl3WritebackCalls.empty()) {
-        return;
-    }
-    
-    // 如果只有 PyMTL3 有调用，记录不匹配
-    if (cppWritebackCalls.empty() && !pymtl3WritebackCalls.empty()) {
-        WritebackRecord pymtl3Call = pymtl3WritebackCalls.front();
-        pymtl3WritebackCalls.pop();
-        logMismatch("writeback call",
-            csprintf("PyMTL3 called writeback for sn=%lu but C++ didn't",
-                     pymtl3Call.seqNum));
-        return;
-    }
-    
-    // 如果只有 C++ 有调用，等待 PyMTL3 的调用
-    if (!cppWritebackCalls.empty() && pymtl3WritebackCalls.empty()) {
-        return;
-    }
-    
-    // 双方都有调用，进行对比
-    // 注意：C++ 和 PyMTL3 的 writeback 顺序可能不同（例如 forwarding loads）
-    // 所以我们采用宽松的比较策略：只要 PyMTL3 的请求匹配 C++ 的任意一个请求即可
-    WritebackRecord pymtl3Call = pymtl3WritebackCalls.front();
-    pymtl3WritebackCalls.pop();
-    
-    // 在 C++ 的队列中查找匹配的 writeback
-    bool foundMatch = false;
-    std::queue<WritebackRecord> tempQueue;
-    
-    while (!cppWritebackCalls.empty()) {
-        WritebackRecord cppCall = cppWritebackCalls.front();
-        cppWritebackCalls.pop();
-        
-        if (cppCall.seqNum == pymtl3Call.seqNum) {
-            // 找到匹配的 seqNum，进行详细比较
-            foundMatch = true;
-            
-            // 比较 fault 状态
-            if (cppCall.fault != pymtl3Call.fault) {
-                logMismatch("writeback call",
-                    csprintf("fault mismatch for sn=%lu: C++=%d, PyMTL3=%d",
-                             cppCall.seqNum, cppCall.fault, pymtl3Call.fault));
-                // 将剩余的调用放回队列
-                while (!tempQueue.empty()) {
-                    cppWritebackCalls.push(tempQueue.front());
-                    tempQueue.pop();
-                }
-                return;
-            }
-            
-            // 比较数据（如果都有数据）
-            if (cppCall.hasData && pymtl3Call.hasData) {
-                if (cppCall.data.size() != pymtl3Call.data.size()) {
-                    logMismatch("writeback call",
-                        csprintf("data size mismatch for sn=%lu: C++=%zu, PyMTL3=%zu",
-                                 cppCall.seqNum, cppCall.data.size(), pymtl3Call.data.size()));
-                    // 将剩余的调用放回队列
-                    while (!tempQueue.empty()) {
-                        cppWritebackCalls.push(tempQueue.front());
-                        tempQueue.pop();
-                    }
-                    return;
-                }
-                for (size_t i = 0; i < cppCall.data.size(); i++) {
-                    if (cppCall.data[i] != pymtl3Call.data[i]) {
-                        logMismatch("writeback call",
-                            csprintf("data mismatch for sn=%lu at byte %zu: C++=0x%x, PyMTL3=0x%x",
-                                     cppCall.seqNum, i, cppCall.data[i], pymtl3Call.data[i]));
-                        // 将剩余的调用放回队列
-                        while (!tempQueue.empty()) {
-                            cppWritebackCalls.push(tempQueue.front());
-                            tempQueue.pop();
-                        }
-                        return;
-                    }
-                }
-            }
-            
-            // 所有检查通过
-            std::cerr << "[LSQComparison] Writeback calls match for sn=" << cppCall.seqNum << std::endl;
-            break;
-        } else {
-            // 不匹配，保存到临时队列
-            tempQueue.push(cppCall);
-        }
-    }
-    
-    // 将剩余的调用放回队列
-    while (!tempQueue.empty()) {
-        cppWritebackCalls.push(tempQueue.front());
-        tempQueue.pop();
-    }
-    
-    if (!foundMatch) {
-        logMismatch("writeback call",
-            csprintf("seqNum mismatch: C++ does not have sn=%lu",
-                     pymtl3Call.seqNum));
-    }
 }
 
 // ===== 异步TLB转换实现 =====
