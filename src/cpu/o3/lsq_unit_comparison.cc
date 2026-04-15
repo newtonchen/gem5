@@ -204,10 +204,6 @@ LSQUnitComparison::insertLoad(const DynInstPtr &load_inst)
         
         // 获取指令的 fault 状态（来自之前流水线阶段，如 ITLB）
         int fault = (load_inst->getFault() != NoFault) ? 1 : 0;
-        if (fault != 0) {
-            std::cerr << "[LSQComparison-DEBUG] insertLoad: sn=" << seq_num 
-                      << " has fault from earlier stage" << std::endl;
-        }
 
         pymtl3_insert_load(pymtl3LSQ, seq_num, pc, ea, size, fault);
 
@@ -231,17 +227,6 @@ LSQUnitComparison::insertStore(const DynInstPtr &store_inst)
         
         // 获取指令的 fault 状态（来自之前流水线阶段，如 ITLB）
         int fault = (store_inst->getFault() != NoFault) ? 1 : 0;
-        if (fault != 0) {
-            std::cerr << "[LSQComparison-DEBUG] insertStore: sn=" << seq_num 
-                      << " has fault from earlier stage" << std::endl;
-        }
-
-        // 调试日志：追踪 sn=37-40
-        if (seq_num >= 37 && seq_num <= 40) {
-            std::cerr << "[LSQComparison-TRACE] insertStore: sn=" << seq_num 
-                      << ", pc=0x" << std::hex << pc << std::dec
-                      << ", fault=" << fault << std::endl;
-        }
 
         pymtl3_insert_store(pymtl3LSQ, seq_num, pc, ea, size, fault);
 
@@ -260,43 +245,22 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
     if (pymtl3Available && pymtl3LSQ) {
         InstSeqNum seq_num = inst->seqNum;
         int lq_idx = inst->lqIdx;
-        
-        // 调试输出 - 添加更多上下文信息
-        std::cerr << "[LSQComparison-DEBUG] executeLoad: sn=" << seq_num 
-                  << ", lq_idx=" << lq_idx
-                  << ", effAddrValid=" << inst->effAddrValid()
-                  << ", isExecuted=" << inst->isExecuted()
-                  << ", isTranslationDelayed=" << inst->isTranslationDelayed()
-                  << ", translationCompleted=" << inst->translationCompleted()
-                  << ", getFault=" << (inst->getFault() == NoFault ? "NoFault" : "Fault")
-                  << ", result=" << (result == NoFault ? "NoFault" : "Fault")
-                  << std::endl;
-        
+
         // 如果指令已经在 Gem5 中执行过了，跳过 fault 比较
-        // 因为这条指令可能已经在之前的周期中被处理过，PyMTL3 可能还没有同步
-        if (inst->isExecuted()) {
-            std::cerr << "[LSQComparison-DEBUG] executeLoad: sn=" << seq_num 
-                      << " already executed, skipping fault comparison" << std::endl;
-        } else {
-            // 在调用 execute_load 之前，先更新 PyMTL3 中指令的地址和 fault 状态
-            // 这确保了即使 fault 是在 insert 之后设置的，也能正确同步
-            
+        if (!inst->isExecuted()) {
             // 更新 load 地址（如果 effAddrValid）
             if (inst->effAddrValid()) {
                 pymtl3_update_load_addr(pymtl3LSQ, seq_num, inst->effAddr, inst->effSize);
-                std::cerr << "[LSQComparison-DEBUG] executeLoad: sn=" << seq_num 
-                          << " updated load addr=0x" << std::hex << inst->effAddr 
-                          << ", size=" << std::dec << inst->effSize << std::endl;
             }
-            
+
             int fault = (inst->getFault() != NoFault) ? 1 : 0;
             pymtl3_update_load_inst_fault(pymtl3LSQ, lq_idx, fault, seq_num);
-            
+
             // 调用 PyMTL3 的 execute_load
             int py_fault = pymtl3_execute_load(pymtl3LSQ, seq_num, lq_idx);
-            
+
             // 对比结果
-            if ((result == NoFault && py_fault != 0) || 
+            if ((result == NoFault && py_fault != 0) ||
                 (result != NoFault && py_fault == 0)) {
                 std::cerr << "[LSQComparison] Mismatch in executeLoad fault: "
                           << "Gem5=" << (result == NoFault ? "NoFault" : "Fault")
@@ -327,31 +291,14 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
         Addr ea = inst->effAddr;
         uint32_t size = inst->effSize;
         
-        // 调试输出
-        std::cerr << "[LSQComparison-DEBUG] executeStore: sn=" << seq_num 
-                  << ", sq_idx=" << sq_idx
-                  << ", ea=0x" << std::hex << ea << std::dec
-                  << ", size=" << size << std::endl;
-        
         // 获取 Store 数据
         const uint8_t* store_data = nullptr;
         bool is_all_zeros = false;
-        std::cerr << "[LSQComparison-DEBUG] Store queue check: sq_idx=" << sq_idx
-                  << ", storeQueue.size()=" << storeQueue.size()
-                  << ", storeQueue.capacity()=" << storeQueue.capacity() << std::endl;
         if (sq_idx >= 0 && sq_idx < storeQueue.capacity()) {
             auto& sq_entry = storeQueue[sq_idx];
-            std::cerr << "[LSQComparison-DEBUG] SQ entry: sq_idx=" << sq_idx
-                      << ", valid=" << sq_entry.valid() << std::endl;
             if (sq_entry.valid()) {
                 store_data = reinterpret_cast<const uint8_t*>(sq_entry.data());
                 is_all_zeros = sq_entry.isAllZeros();
-                // Print first byte of data for debugging
-                unsigned int first_byte = is_all_zeros ? 0 : (unsigned int)(unsigned char)store_data[0];
-                std::cerr << "[LSQComparison-DEBUG] Store data: sq_idx=" << sq_idx
-                          << ", data_ptr=" << (void*)store_data
-                          << ", is_all_zeros=" << is_all_zeros
-                          << ", first_byte=0x" << std::hex << first_byte << std::dec << std::endl;
             }
         }
         
@@ -429,11 +376,6 @@ LSQUnitComparison::writebackStores()
 void
 LSQUnitComparison::writeback(const DynInstPtr &inst, PacketPtr pkt)
 {
-    // 调试输出 - 确认方法被调用
-    std::cerr << "[LSQComparison-DEBUG] writeback called: sn=" << inst->seqNum
-              << ", isExecuted=" << inst->isExecuted()
-              << ", isLoad=" << inst->isLoad() << std::endl;
-    
     // 记录 C++ 端的 writeback 调用
     WritebackRecord record;
     record.cycle = curTick();
@@ -451,13 +393,7 @@ LSQUnitComparison::writeback(const DynInstPtr &inst, PacketPtr pkt)
     }
     
     cppWritebackCalls.push(record);
-    
-    // 调试输出
-    std::cerr << "[LSQComparison-DEBUG] C++ writeback: sn=" << inst->seqNum
-              << ", fault=" << record.fault
-              << ", hasData=" << record.hasData
-              << ", cycle=" << record.cycle << std::endl;
-    
+
     // 调用基类实现
     LSQUnit::writeback(inst, pkt);
 }
@@ -514,15 +450,7 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
     PacketPtr mainPkt = request->mainPacket();
     bool isSquashed = inst->isSquashed();
     
-    if (callCount <= 10) {
-        std::cerr << "[LSQComparison-DEBUG] completeDataAccess called, count=" 
-                  << callCount << ", pkt=" << pkt 
-                  << ", isLoad=" << inst->isLoad()
-                  << ", isStore=" << inst->isStore()
-                  << ", needWBToRegister=" << needWB
-                  << ", isSquashed=" << isSquashed
-                  << ", mainPacket=" << mainPkt << std::endl;
-    }
+    // 调试输出已禁用
 
     // 1. 记录当前 cycle (使用 PyMTL3 的 cycle，与 PyMTL3 同步)
     uint64_t callCycle = 0;
@@ -534,13 +462,7 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
 
     // 2. 记录 C++ 的 DCache 调用
     if (mockDCache && pkt) {
-        std::cerr << "[LSQComparison-DEBUG] Recording C++ DCache call at cycle=" << callCycle << std::endl;
         mockDCache->recordCPCall(callCycle, pkt, "completeDataAccess");
-    } else {
-        if (callCount <= 10) {
-            std::cerr << "[LSQComparison-DEBUG] Skipping record: mockDCache=" 
-                      << mockDCache << ", pkt=" << pkt << std::endl;
-        }
     }
 
     // 3. 发送 DCache 响应给 PyMTL3（如果是 Load 且需要写回）
@@ -548,9 +470,6 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
         // 获取响应数据
         const uint8_t* data = pkt->getConstPtr<uint8_t>();
         uint32_t data_size = pkt->getSize();
-        
-        std::cerr << "[LSQComparison-DEBUG] Sending DCache resp to PyMTL3: sn=" 
-                  << inst->seqNum << ", size=" << data_size << std::endl;
         
         pymtl3_send_dcache_resp(pymtl3LSQ, inst->seqNum, data, data_size);
     }
@@ -576,20 +495,7 @@ LSQUnitComparison::recvRetry()
 bool
 LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
 {
-    // 0. 调试输出 - 确认方法被调用
-    static int sendCount = 0;
-    sendCount++;
-    if (sendCount <= 10) {
-        std::cerr << "[LSQComparison-DEBUG] trySendPacket called, count=" 
-                  << sendCount << ", isLoad=" << isLoad 
-                  << ", pkt=" << data_pkt << std::endl;
-        if (data_pkt) {
-            std::cerr << "[LSQComparison-DEBUG] Packet details: addr=0x" 
-                      << std::hex << data_pkt->getAddr() << std::dec
-                      << ", size=" << data_pkt->getSize()
-                      << ", isWrite=" << data_pkt->isWrite() << std::endl;
-        }
-    }
+    // 调试输出已禁用
 
     // 1. 记录当前 cycle (使用 PyMTL3 的 cycle，与 PyMTL3 同步)
     uint64_t callCycle = 0;
@@ -608,8 +514,6 @@ LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
         // 尝试从packet的inst获取seq_num
         // 注意：packet可能不直接包含inst，我们需要其他方式获取
         // 这里我们暂时使用地址来匹配
-        std::cerr << "[LSQComparison-DEBUG] Store sendTimingReq: physAddr=0x" 
-                  << std::hex << physAddr << std::dec << ", size=" << size << std::endl;
         
         // TODO: 更新PyMTL3的store地址为物理地址
         // 这需要知道是哪个store在发送，可能需要从LSQUnit的状态中获取
@@ -631,10 +535,7 @@ LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
                 seqNum = request->instruction()->seqNum;
             }
         }
-        std::cerr << "[LSQComparison-DEBUG] Recording C++ DCache sendTimingReq at cycle=" << callCycle << " sn=" << seqNum << " (sent successfully)" << std::endl;
         mockDCache->recordCPCall(callCycle, data_pkt, "sendTimingReq", seqNum);
-    } else if (!ret && sendCount <= 10) {
-        std::cerr << "[LSQComparison-DEBUG] sendTimingReq not sent (cache blocked or port unavailable)" << std::endl;
     }
 
     return ret;
@@ -730,12 +631,9 @@ Addr
 LSQUnitComparison::translateAddress(Addr vaddr)
 {
     // 使用 Gem5 的 MMU 进行真正的 TLB 转换
-    std::cerr << "[LSQComparison-TLB] translateAddress called for vaddr=0x" 
-              << std::hex << vaddr << std::dec << std::endl;
     
     // 检查 CPU 指针是否有效
     if (!cpuPtr) {
-        std::cerr << "[LSQComparison-TLB] CPU pointer not available, returning vaddr" << std::endl;
         return vaddr;
     }
     
@@ -744,32 +642,27 @@ LSQUnitComparison::translateAddress(Addr vaddr)
     try {
         tc = cpuPtr->tcBase(threadId);
     } catch (...) {
-        std::cerr << "[LSQComparison-TLB] Exception getting ThreadContext, returning vaddr" << std::endl;
         return vaddr;
     }
     
     if (!tc) {
-        std::cerr << "[LSQComparison-TLB] ThreadContext not available, returning vaddr" << std::endl;
         return vaddr;
     }
     
     // 在SE模式下，TLB需要Process指针
     // 检查ThreadContext是否有有效的Process
     if (!tc->getProcessPtr()) {
-        std::cerr << "[LSQComparison-TLB] Process not available in ThreadContext, returning vaddr" << std::endl;
         return vaddr;
     }
     
     // 获取 MMU
     BaseMMU *mmu = tc->getMMUPtr();
     if (!mmu) {
-        std::cerr << "[LSQComparison-TLB] MMU not available from TC, trying getMMUPtr()" << std::endl;
         // 回退到 getMMUPtr()
         mmu = getMMUPtr();
     }
     
     if (!mmu) {
-        std::cerr << "[LSQComparison-TLB] MMU not available, returning vaddr" << std::endl;
         return vaddr;
     }
     
@@ -780,7 +673,6 @@ LSQUnitComparison::translateAddress(Addr vaddr)
     
     // 简化处理：对于SE模式下的模拟，使用identity mapping
     // 这样可以避免TLB转换的复杂性
-    std::cerr << "[LSQComparison-TLB] Using identity mapping for SE mode" << std::endl;
     return vaddr;
     
     // 注意：如果需要真正的TLB转换，可以取消下面的注释
@@ -795,12 +687,10 @@ LSQUnitComparison::translateAddress(Addr vaddr)
     try {
         fault = mmu->translateAtomic(req, tc, BaseMMU::Mode::Write);
     } catch (...) {
-        std::cerr << "[LSQComparison-TLB] Exception during translateAtomic, returning vaddr" << std::endl;
         return vaddr;
     }
     
     if (fault != NoFault) {
-        std::cerr << "[LSQComparison-TLB] Translation failed with fault" << std::endl;
         // 转换失败，返回虚拟地址
         return vaddr;
     }
@@ -808,11 +698,8 @@ LSQUnitComparison::translateAddress(Addr vaddr)
     // 获取转换后的物理地址
     if (req->hasPaddr()) {
         Addr paddr = req->getPaddr();
-        std::cerr << "[LSQComparison-TLB] Translation successful: vaddr=0x" 
-                  << std::hex << vaddr << " -> paddr=0x" << paddr << std::dec << std::endl;
         return paddr;
     } else {
-        std::cerr << "[LSQComparison-TLB] Translation did not set paddr" << std::endl;
         return vaddr;
     }
     */
@@ -831,12 +718,6 @@ LSQUnitComparison::notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
     record.fault = fault;
     
     pymtl3WritebackCalls.push(record);
-    
-    // 调试输出
-    std::cerr << "[LSQComparison-DEBUG] PyMTL3 writeback: sn=" << seqNum
-              << ", fault=" << fault
-              << ", hasData=" << hasData
-              << ", cycle=" << cycle << std::endl;
 }
 
 // ===== 异步TLB转换实现 =====
@@ -846,9 +727,6 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
                                  uint32_t size, bool is_load)
 {
     uint64_t callCycle = curTick();
-    std::cerr << "[LSQComparison-TLB] handleTLBReq: sn=" << seq_num
-              << ", vaddr=0x" << std::hex << vaddr << std::dec
-              << ", size=" << size << ", is_load=" << is_load << std::endl;
 
     // 记录 C++ TLB 请求
     if (mockTLB) {
@@ -857,7 +735,6 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
 
     // 获取 ThreadContext 和 MMU
     if (!cpuPtr) {
-        std::cerr << "[LSQComparison-TLB] ERROR: CPU pointer not available" << std::endl;
         sendTLBResp(seq_num, 0, 1);  // Send fault
         return;
     }
@@ -866,13 +743,11 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
     try {
         tc = cpuPtr->tcBase(threadId);
     } catch (...) {
-        std::cerr << "[LSQComparison-TLB] ERROR: Exception getting ThreadContext" << std::endl;
         sendTLBResp(seq_num, 0, 1);  // Send fault
         return;
     }
     
     if (!tc) {
-        std::cerr << "[LSQComparison-TLB] ERROR: ThreadContext not available" << std::endl;
         sendTLBResp(seq_num, 0, 1);  // Send fault
         return;
     }
@@ -883,7 +758,6 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
     }
     
     if (!mmu) {
-        std::cerr << "[LSQComparison-TLB] ERROR: MMU not available" << std::endl;
         sendTLBResp(seq_num, 0, 1);  // Send fault
         return;
     }
@@ -913,10 +787,6 @@ LSQUnitComparison::completeTLBTranslation(uint64_t seq_num, Addr paddr,
                                            Fault fault, bool delayed)
 {
     uint64_t callCycle = curTick();
-    std::cerr << "[LSQComparison-TLB] completeTLBTranslation: sn=" << seq_num
-              << ", paddr=0x" << std::hex << paddr << std::dec
-              << ", fault=" << (fault == NoFault ? "NoFault" : "Fault")
-              << ", delayed=" << delayed << std::endl;
 
     // 记录 C++ TLB resp
     int fault_code = (fault == NoFault) ? 0 : 1;
@@ -944,11 +814,9 @@ LSQUnitComparison::compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int faul
     // 检查是否有等待的 PyMTL3 TLB resp
     TLBCallRecord pymtl3Resp;
     if (!mockTLB->getNextPyMTL3TLBResp(pymtl3Resp)) {
-        std::cerr << "[LSQComparison-TLB] No PyMTL3 TLB resp queued for sn=" << seq_num << std::endl;
         return;
     }
 
-    std::cerr << "[LSQComparison-TLB] Comparing TLB resp for sn=" << seq_num << std::endl;
 
     // 对比 PyMTL3 resp 和 C++ resp
     std::string reason;
@@ -959,7 +827,6 @@ LSQUnitComparison::compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int faul
     cppResp.methodName = "translateResp";
 
     if (!MockTLBPort::compareCalls(cppResp, pymtl3Resp, reason)) {
-        std::cerr << "[LSQComparison-TLB] Mismatch in TLB resp: " << reason << std::endl;
         logMismatch("TLB.resp", reason);
     }
 
@@ -970,14 +837,8 @@ LSQUnitComparison::compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int faul
 void
 LSQUnitComparison::sendTLBResp(uint64_t seq_num, Addr paddr, int fault)
 {
-    std::cerr << "[LSQComparison-TLB] sendTLBResp: sn=" << seq_num
-              << ", paddr=0x" << std::hex << paddr << std::dec
-              << ", fault=" << fault << std::endl;
-
     if (tlbRespCallback) {
         tlbRespCallback(seq_num, paddr, fault);
-    } else {
-        std::cerr << "[LSQComparison-TLB] Warning: tlbRespCallback not set" << std::endl;
     }
 }
 

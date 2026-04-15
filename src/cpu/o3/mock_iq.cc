@@ -33,9 +33,6 @@ MockIQPort::recordCPReplay(uint64_t cycle, uint64_t seqNum)
     record.methodName = "replay";
 
     cppReplays.push(record);
-
-    std::cerr << "[MockIQ] C++ Replay recorded: cycle=" << cycle
-              << ", sn=" << seqNum << std::endl;
 }
 
 void
@@ -47,9 +44,6 @@ MockIQPort::recordCPReschedule(uint64_t cycle, uint64_t seqNum)
     record.methodName = "reschedule";
 
     cppReschedules.push(record);
-
-    std::cerr << "[MockIQ] C++ Reschedule recorded: cycle=" << cycle
-              << ", sn=" << seqNum << std::endl;
 }
 
 void
@@ -61,9 +55,6 @@ MockIQPort::recordPyMTL3Replay(uint64_t cycle, uint64_t seqNum)
     record.methodName = "replay";
 
     pymtl3Replays.push(record);
-
-    std::cerr << "[MockIQ] PyMTL3 Replay recorded: cycle=" << cycle
-              << ", sn=" << seqNum << std::endl;
 }
 
 void
@@ -75,9 +66,6 @@ MockIQPort::recordPyMTL3Reschedule(uint64_t cycle, uint64_t seqNum)
     record.methodName = "reschedule";
 
     pymtl3Reschedules.push(record);
-
-    std::cerr << "[MockIQ] PyMTL3 Reschedule recorded: cycle=" << cycle
-              << ", sn=" << seqNum << std::endl;
 }
 
 bool

@@ -37,11 +37,6 @@ MockTLBPort::recordCPTLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
     record.methodName = "translateReq";
 
     cppTLBReqs.push(record);
-
-    std::cerr << "[MockTLB] C++ TLB Req recorded: cycle=" << cycle
-              << ", vaddr=0x" << std::hex << vaddr << std::dec
-              << ", size=" << size << ", isLoad=" << isLoad
-              << ", sn=" << seqNum << std::endl;
 }
 
 void
@@ -56,11 +51,6 @@ MockTLBPort::recordCPTLBResp(uint64_t cycle, uint64_t seqNum,
     record.methodName = "translateResp";
 
     cppTLBResps.push(record);
-
-    std::cerr << "[MockTLB] C++ TLB Resp recorded: cycle=" << cycle
-              << ", sn=" << seqNum
-              << ", paddr=0x" << std::hex << paddr << std::dec
-              << ", fault=" << fault << std::endl;
 }
 
 void
@@ -76,11 +66,6 @@ MockTLBPort::recordPyMTL3TLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
     record.methodName = "translateReq";
 
     pymtl3TLBReqs.push(record);
-
-    std::cerr << "[MockTLB] PyMTL3 TLB Req recorded: cycle=" << cycle
-              << ", vaddr=0x" << std::hex << vaddr << std::dec
-              << ", size=" << size << ", isLoad=" << isLoad
-              << ", sn=" << seqNum << std::endl;
 }
 
 void
@@ -95,11 +80,6 @@ MockTLBPort::recordPyMTL3TLBResp(uint64_t cycle, uint64_t seqNum,
     record.methodName = "translateResp";
 
     pymtl3TLBResps.push(record);
-
-    std::cerr << "[MockTLB] PyMTL3 TLB Resp recorded: cycle=" << cycle
-              << ", sn=" << seqNum
-              << ", paddr=0x" << std::hex << paddr << std::dec
-              << ", fault=" << fault << std::endl;
 }
 
 bool

@@ -38,3 +38,7 @@ configs/dram/lowp_sweep.cfg
 .vscode
 typings
 .DS_Store
+*.log
+gem5-resources/
+include/gem5/include/
+tests/test-progs/dhrystone/
