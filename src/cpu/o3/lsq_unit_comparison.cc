@@ -114,6 +114,15 @@ static void pymtl3WritebackCallback(uint64_t cycle, uint64_t seqNum,
     }
 }
 
+// 静态回调函数，用于接收 PyMTL3 的 IQ replay/reschedule 调用通知
+static void pymtl3IQCallback(uint64_t cycle, uint64_t seqNum,
+                             const std::string& method)
+{
+    if (g_currentLSQUnitComparison) {
+        g_currentLSQUnitComparison->notifyPyMTL3IQCall(cycle, seqNum, method);
+    }
+}
+
 void
 LSQUnitComparison::init(CPU *cpu_ptr, IEW *iew_ptr,
                        const BaseO3CPUParams &params,
@@ -175,6 +184,10 @@ LSQUnitComparison::init(CPU *cpu_ptr, IEW *iew_ptr,
             // 设置 writeback 回调函数，用于 writeback 对比
             std::cout << "[LSQComparison] Setting up writeback callback..." << std::endl;
             pymtl3_set_writeback_callback(pymtl3LSQ, pymtl3WritebackCallback);
+            
+            // 设置 IQ 回调函数，用于 replay/reschedule 对比
+            std::cout << "[LSQComparison] Setting up IQ callback..." << std::endl;
+            pymtl3_set_iq_callback(pymtl3LSQ, pymtl3IQCallback);
         } else {
             std::cout << "[LSQComparison] PyMTL3 LSQ not available, using Gem5 only" << std::endl;
         }
@@ -238,6 +251,14 @@ LSQUnitComparison::insertStore(const DynInstPtr &store_inst)
 Fault
 LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 {
+    uint64_t callCycle = curTick();
+
+    // 记录执行前的 rescheduledLoads 计数
+    uint64_t prevRescheduledLoads = 0;
+    if (mockIQ) {
+        prevRescheduledLoads = LSQUnit::stats.rescheduledLoads.value();
+    }
+
     // 调用基类实现（Gem5）
     Fault result = LSQUnit::executeLoad(inst);
 
@@ -245,6 +266,14 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
     if (pymtl3Available && pymtl3LSQ) {
         InstSeqNum seq_num = inst->seqNum;
         int lq_idx = inst->lqIdx;
+
+        // 记录 C++ 侧的 reschedule 调用（通过统计值变化检测）
+        if (mockIQ) {
+            uint64_t curRescheduledLoads = LSQUnit::stats.rescheduledLoads.value();
+            if (curRescheduledLoads > prevRescheduledLoads) {
+                mockIQ->recordCPReschedule(callCycle, seq_num);
+            }
+        }
 
         // 如果指令已经在 Gem5 中执行过了，跳过 fault 比较
         if (!inst->isExecuted()) {
@@ -269,6 +298,9 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
             }
         }
         
+        // 对比 IQ 调用记录
+        compareIQCalls();
+
         // 注意：队列状态比较在 LSQ::tick() 中统一进行
         // 以确保 PyMTL3 的 @update_ff 已经执行
         compareStatistics();
@@ -367,8 +399,24 @@ LSQUnitComparison::commitStores(InstSeqNum &youngest_inst)
 void
 LSQUnitComparison::writebackStores()
 {
+    uint64_t callCycle = curTick();
+
+    bool wasStalled = LSQUnit::isStalled();
+
     // 调用基类实现（Gem5）
     LSQUnit::writebackStores();
+
+    // 检测 C++ 侧的 replay 调用（stall 解除意味着 replay 发生）
+    // 注意：无法直接获取被 replay 的 load 的 seq_num，
+    // 因为 stallingLoadIdx 是 private 的
+    if (mockIQ && wasStalled && !LSQUnit::isStalled()) {
+        mockIQ->recordCPReplay(callCycle, 0);
+    }
+
+    // 对比 IQ 调用记录
+    if (pymtl3Available && pymtl3LSQ) {
+        compareIQCalls();
+    }
 
     // PyMTL3 不需要显式写回
 }
@@ -613,6 +661,58 @@ LSQUnitComparison::compareStatistics()
 }
 
 void
+LSQUnitComparison::compareIQCalls()
+{
+    if (!mockIQ) {
+        return;
+    }
+
+    // 对比 Replay 调用
+    while (mockIQ->hasPendingCPReplays() || mockIQ->hasPendingPyMTL3Replays()) {
+        IQCallRecord cpRecord, pyRecord;
+        bool hasCP = mockIQ->getNextCPReplay(cpRecord);
+        bool hasPy = mockIQ->getNextPyMTL3Replay(pyRecord);
+
+        if (hasCP && hasPy) {
+            std::string reason;
+            if (!MockIQPort::compareCalls(cpRecord, pyRecord, reason)) {
+                logMismatch("IQ.replay", reason);
+            }
+        } else if (hasCP) {
+            logMismatch("IQ.replay",
+                csprintf("C++ has replay but PyMTL3 does not [sn=%d]",
+                         cpRecord.seqNum));
+        } else if (hasPy) {
+            logMismatch("IQ.replay",
+                csprintf("PyMTL3 has replay but C++ does not [sn=%d]",
+                         pyRecord.seqNum));
+        }
+    }
+
+    // 对比 Reschedule 调用
+    while (mockIQ->hasPendingCPReschedules() || mockIQ->hasPendingPyMTL3Reschedules()) {
+        IQCallRecord cpRecord, pyRecord;
+        bool hasCP = mockIQ->getNextCPReschedule(cpRecord);
+        bool hasPy = mockIQ->getNextPyMTL3Reschedule(pyRecord);
+
+        if (hasCP && hasPy) {
+            std::string reason;
+            if (!MockIQPort::compareCalls(cpRecord, pyRecord, reason)) {
+                logMismatch("IQ.reschedule", reason);
+            }
+        } else if (hasCP) {
+            logMismatch("IQ.reschedule",
+                csprintf("C++ has reschedule but PyMTL3 does not [sn=%d]",
+                         cpRecord.seqNum));
+        } else if (hasPy) {
+            logMismatch("IQ.reschedule",
+                csprintf("PyMTL3 has reschedule but C++ does not [sn=%d]",
+                         pyRecord.seqNum));
+        }
+    }
+}
+
+void
 LSQUnitComparison::notifyPyMTL3DCacheCall(uint64_t cycle, Addr addr,
                                          uint32_t size, bool isWrite,
                                          const std::vector<uint8_t>& data,
@@ -718,6 +818,19 @@ LSQUnitComparison::notifyPyMTL3WritebackCall(uint64_t cycle, uint64_t seqNum,
     record.fault = fault;
     
     pymtl3WritebackCalls.push(record);
+}
+
+void
+LSQUnitComparison::notifyPyMTL3IQCall(uint64_t cycle, uint64_t seqNum,
+                                      const std::string& method)
+{
+    if (mockIQ) {
+        if (method == "replay") {
+            mockIQ->recordPyMTL3Replay(cycle, seqNum);
+        } else if (method == "reschedule") {
+            mockIQ->recordPyMTL3Reschedule(cycle, seqNum);
+        }
+    }
 }
 
 // ===== 异步TLB转换实现 =====
@@ -870,29 +983,15 @@ LSQUnitComparison::recordPyMTL3Reschedule(uint64_t cycle, uint64_t seqNum)
 void
 LSQUnitComparison::handleReplayReq(uint64_t seqNum)
 {
-    uint64_t callCycle = curTick();
-    std::cerr << "[LSQComparison-IQ] handleReplayReq: sn=" << seqNum << std::endl;
-
-    // 记录 C++ 的 replay 调用
-    if (mockIQ) {
-        mockIQ->recordCPReplay(callCycle, seqNum);
-    }
-
-    // 注意：不实际驱动 gem5，只做记录和对比
+    // C++ 侧的 replay 记录已通过 writebackStores 中的检测逻辑完成
+    // 此方法保留作为备用入口
 }
 
 void
 LSQUnitComparison::handleRescheduleReq(uint64_t seqNum)
 {
-    uint64_t callCycle = curTick();
-    std::cerr << "[LSQComparison-IQ] handleRescheduleReq: sn=" << seqNum << std::endl;
-
-    // 记录 C++ 的 reschedule 调用
-    if (mockIQ) {
-        mockIQ->recordCPReschedule(callCycle, seqNum);
-    }
-
-    // 注意：不实际驱动 gem5，只做记录和对比
+    // C++ 侧的 reschedule 记录已通过 executeLoad 中的检测逻辑完成
+    // 此方法保留作为备用入口
 }
 
 // 全局回调函数，供 pybind11 调用

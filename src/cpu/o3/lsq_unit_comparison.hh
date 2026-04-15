@@ -123,6 +123,18 @@ void pymtl3_set_writeback_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, bool, const std::vector<uint8_t>&, int));
 
 /**
+ * Set IQ callback for PyMTL3 LSQUnitCL.
+ * This callback is called when PyMTL3 sends a replay or reschedule request.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t cycle, uint64_t seq_num,
+ *                                 const std::string& method)
+ */
+void pymtl3_set_iq_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, const std::string&));
+
+/**
  * LSQUnitComparison - Simplified comparison wrapper
  *
  * This class inherits from LSQUnit and uses the base class as the Gem5 implementation.
@@ -267,6 +279,14 @@ class LSQUnitComparison : public LSQUnit
                                    bool hasData, const std::vector<uint8_t>& data,
                                    int fault);
 
+    /**
+     * Notify that PyMTL3 made an IQ replay/reschedule call.
+     * Called from pybind11 callback.
+     * Public to allow access from static callback function.
+     */
+    void notifyPyMTL3IQCall(uint64_t cycle, uint64_t seqNum,
+                            const std::string& method);
+
     // ===== IQ Replay/Reschedule 记录和对比 =====
 
     /**
@@ -380,6 +400,11 @@ class LSQUnitComparison : public LSQUnit
      * Compare statistics between implementations.
      */
     void compareStatistics();
+
+    /**
+     * Compare IQ replay/reschedule calls between C++ and PyMTL3.
+     */
+    void compareIQCalls();
 
     // Friend declaration for callback access
     friend void notify_dcache_call_from_pymtl3(uint64_t, Addr, uint32_t, bool,

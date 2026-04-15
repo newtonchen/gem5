@@ -1085,6 +1085,46 @@ pymtl3_set_writeback_callback(void* lsq,
     }
 }
 
+// ===== IQ Replay/Reschedule 回调接口实现 =====
+
+/**
+ * Set IQ callback for PyMTL3 LSQUnitCL.
+ * This callback is called when PyMTL3 sends a replay or reschedule request.
+ * 
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param callback Callback function pointer.
+ *        Signature: void callback(uint64_t cycle, uint64_t seq_num,
+ *                                 const std::string& method)
+ */
+void
+pymtl3_set_iq_callback(void* lsq,
+    void (*callback)(uint64_t, uint64_t, const std::string&))
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        
+        py::cpp_function py_callback = 
+            [callback](uint64_t cycle, uint64_t seq_num, const std::string& method) {
+                callback(cycle, seq_num, method);
+            };
+        
+        (*wrapper).attr("set_iq_callback")(py_callback);
+        
+        std::cout << "[LSQComparison] IQ callback set for PyMTL3" << std::endl;
+        
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_iq_callback: " 
+                  << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
 // ===== 异步TLB转换接口实现 =====
 
 /**
