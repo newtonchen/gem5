@@ -139,6 +139,17 @@ void pymtl3_set_iq_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, const std::string&));
 
 /**
+ * Set debug mode for PyMTL3 LSQUnitCL.
+ * This is called every cycle to sync the debug flag state from gem5 to PyMTL3.
+ * This enables PyMTL3 to know whether to print debug messages based on
+ * gem5's --debug-start and --debug-end options.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param enabled Whether to enable debug output.
+ */
+void pymtl3_set_debug_enabled(void* lsq, bool enabled);
+
+/**
  * LSQUnitComparison - Simplified comparison wrapper
  *
  * This class inherits from LSQUnit and uses the base class as the Gem5 implementation.

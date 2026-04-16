@@ -1241,5 +1241,28 @@ pymtl3_send_tlb_resp(void* lsq, uint64_t seq_num, uint64_t paddr, int fault)
     }
 }
 
+/**
+ * Set debug mode for PyMTL3 LSQUnitCL.
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ * @param enabled Whether to enable debug output.
+ */
+void
+pymtl3_set_debug_enabled(void* lsq, bool enabled)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("set_debug_enabled")(enabled);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in set_debug_enabled: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
 } // namespace o3
 } // namespace gem5

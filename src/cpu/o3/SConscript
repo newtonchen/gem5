@@ -97,6 +97,7 @@ if env['CONF']['BUILD_ISA']:
     DebugFlag('LSQUnit')
     DebugFlag('MemDepUnit')
     DebugFlag('O3CPU')
+    DebugFlag('PyMTL3')
     DebugFlag('ROB')
     DebugFlag('Rename')
     DebugFlag('Scoreboard')

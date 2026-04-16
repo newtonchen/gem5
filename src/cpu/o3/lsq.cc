@@ -62,6 +62,7 @@
 #include "debug/Fetch.hh"
 #include "debug/HtmCpu.hh"
 #include "debug/LSQ.hh"
+#include "debug/PyMTL3.hh"
 #include "debug/Writeback.hh"
 #include "params/BaseO3CPU.hh"
 
@@ -254,6 +255,10 @@ LSQ::tick()
     for (auto& t : thread) {
         auto* comparisonUnit = dynamic_cast<LSQUnitComparison*>(t.get());
         if (comparisonUnit && comparisonUnit->getPyMTL3LSQ()) {
+            // Check if PyMTL3 debug flag is enabled and sync to PyMTL3
+            bool debug_enabled = debug::PyMTL3;
+            pymtl3_set_debug_enabled(comparisonUnit->getPyMTL3LSQ(), debug_enabled);
+            
             pymtl3_tick(comparisonUnit->getPyMTL3LSQ());
             // Note: We no longer compare queue states here
             // Comparison is now focused on interface calls, not internal states

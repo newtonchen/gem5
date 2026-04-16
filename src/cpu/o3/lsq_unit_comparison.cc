@@ -14,6 +14,7 @@
 #include "base/str.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "cpu/o3/limits.hh"
+#include "debug/PyMTL3.hh"
 #include "mem/request.hh"
 #include <iostream>
 
@@ -206,6 +207,8 @@ LSQUnitComparison::name() const
 void
 LSQUnitComparison::insertLoad(const DynInstPtr &load_inst)
 {
+    DPRINTF(PyMTL3, "insertLoad sn=%llu pc=%llx\n", load_inst->seqNum, load_inst->pcState().instAddr());
+    
     LSQUnit::insertLoad(load_inst);
 
     if (pymtl3Available && pymtl3LSQ) {
@@ -248,6 +251,8 @@ Fault
 LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 {
     uint64_t callCycle = curTick();
+
+    DPRINTF(PyMTL3, "executeLoad sn=%llu lqIdx=%d\n", inst->seqNum, inst->lqIdx);
 
     uint64_t prevRescheduledLoads = 0;
     if (mockIQ) {
