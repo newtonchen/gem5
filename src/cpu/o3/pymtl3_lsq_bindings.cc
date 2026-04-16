@@ -164,7 +164,7 @@ create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries)
  * @return True if successful.
  */
 bool
-pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault)
+pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_strictly_ordered)
 {
     if (!lsq) {
         return false;
@@ -173,11 +173,9 @@ pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
 
-        // 创建 DynInst (通过 Python) - 使用关键字参数
         py::module dyn_inst_module = py::module::import("gem5_pymtl3.common.dyn_inst");
         py::object DynInst = dyn_inst_module.attr("DynInst");
         
-        // 使用关键字参数创建 DynInst，确保正确设置字段
         py::dict kwargs;
         kwargs["seq_num"] = seq_num;
         kwargs["pc"] = pc;
@@ -186,10 +184,10 @@ pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32
         kwargs["is_load"] = true;
         kwargs["is_store"] = false;
         kwargs["fault"] = fault;
+        kwargs["is_strictly_ordered"] = is_strictly_ordered;
         
         py::object inst = DynInst(**kwargs);
 
-        // 调用 insert_load
         bool result = (*wrapper).attr("insert_load")(inst).cast<bool>();
         return result;
 
@@ -935,6 +933,60 @@ pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t siz
         (*wrapper).attr("update_load_addr")(seq_num, addr, size);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in update_load_addr: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+void
+pymtl3_update_load_phys_addr(void* lsq, uint64_t seq_num, uint64_t paddr)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("update_load_phys_addr")(seq_num, paddr);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in update_load_phys_addr: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+void
+pymtl3_update_load_strictly_ordered(void* lsq, uint64_t seq_num, bool is_strictly_ordered)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("update_load_strictly_ordered")(seq_num, is_strictly_ordered);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in update_load_strictly_ordered: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+void
+pymtl3_update_load_at_commit(void* lsq, uint64_t seq_num, bool is_at_commit)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+        (*wrapper).attr("update_load_at_commit")(seq_num, is_at_commit);
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in update_load_at_commit: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }

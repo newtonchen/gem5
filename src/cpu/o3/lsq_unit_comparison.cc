@@ -36,6 +36,7 @@ LSQUnitComparison::LSQUnitComparison(uint32_t lqEntries, uint32_t sqEntries)
       pymtl3LSQ(nullptr),
       pymtl3Available(false),
       mismatchCount(0),
+      stallingLoadSeqNum(0),
       mockDCache(nullptr),
       mockTLB(nullptr),
       mockIQ(nullptr),
@@ -205,23 +206,18 @@ LSQUnitComparison::name() const
 void
 LSQUnitComparison::insertLoad(const DynInstPtr &load_inst)
 {
-    // 调用基类实现（Gem5）
     LSQUnit::insertLoad(load_inst);
 
-    // 如果 PyMTL3 可用，调用 PyMTL3 实现
     if (pymtl3Available && pymtl3LSQ) {
         InstSeqNum seq_num = load_inst->seqNum;
         Addr pc = load_inst->pcState().instAddr();
-        Addr ea = 0; // TODO: 从 DynInst 获取有效地址
-        uint32_t size = 4; // TODO: 从 DynInst 获取访问大小
+        Addr ea = 0;
+        uint32_t size = 4;
         
-        // 获取指令的 fault 状态（来自之前流水线阶段，如 ITLB）
         int fault = (load_inst->getFault() != NoFault) ? 1 : 0;
+        bool is_strictly_ordered = load_inst->strictlyOrdered();
 
-        pymtl3_insert_load(pymtl3LSQ, seq_num, pc, ea, size, fault);
-
-        // 注意：队列状态比较在 LSQ::tick() 中统一进行
-        // 以确保 PyMTL3 的 @update_ff 已经执行
+        pymtl3_insert_load(pymtl3LSQ, seq_num, pc, ea, size, fault, is_strictly_ordered);
     }
 }
 
@@ -253,21 +249,19 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 {
     uint64_t callCycle = curTick();
 
-    // 记录执行前的 rescheduledLoads 计数
     uint64_t prevRescheduledLoads = 0;
     if (mockIQ) {
         prevRescheduledLoads = LSQUnit::stats.rescheduledLoads.value();
     }
 
-    // 调用基类实现（Gem5）
+    bool wasStalled = LSQUnit::isStalled();
+
     Fault result = LSQUnit::executeLoad(inst);
 
-    // 如果 PyMTL3 可用，调用 PyMTL3 实现
     if (pymtl3Available && pymtl3LSQ) {
         InstSeqNum seq_num = inst->seqNum;
         int lq_idx = inst->lqIdx;
 
-        // 记录 C++ 侧的 reschedule 调用（通过统计值变化检测）
         if (mockIQ) {
             uint64_t curRescheduledLoads = LSQUnit::stats.rescheduledLoads.value();
             if (curRescheduledLoads > prevRescheduledLoads) {
@@ -275,20 +269,30 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
             }
         }
 
-        // 如果指令已经在 Gem5 中执行过了，跳过 fault 比较
+        if (!wasStalled && LSQUnit::isStalled()) {
+            stallingLoadSeqNum = seq_num;
+        }
+
         if (!inst->isExecuted()) {
-            // 更新 load 地址（如果 effAddrValid）
             if (inst->effAddrValid()) {
                 pymtl3_update_load_addr(pymtl3LSQ, seq_num, inst->effAddr, inst->effSize);
             }
 
+            if (inst->physEffAddr != 0) {
+                pymtl3_update_load_phys_addr(pymtl3LSQ, seq_num, inst->physEffAddr);
+            }
+
+            if (inst->strictlyOrdered()) {
+                pymtl3_update_load_strictly_ordered(pymtl3LSQ, seq_num, true);
+            }
+
+            pymtl3_update_load_at_commit(pymtl3LSQ, seq_num, inst->isAtCommit());
+
             int fault = (inst->getFault() != NoFault) ? 1 : 0;
             pymtl3_update_load_inst_fault(pymtl3LSQ, lq_idx, fault, seq_num);
 
-            // 调用 PyMTL3 的 execute_load
             int py_fault = pymtl3_execute_load(pymtl3LSQ, seq_num, lq_idx);
 
-            // 对比结果
             if ((result == NoFault && py_fault != 0) ||
                 (result != NoFault && py_fault == 0)) {
                 std::cerr << "[LSQComparison] Mismatch in executeLoad fault: "
@@ -298,11 +302,8 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
             }
         }
         
-        // 对比 IQ 调用记录
         compareIQCalls();
 
-        // 注意：队列状态比较在 LSQ::tick() 中统一进行
-        // 以确保 PyMTL3 的 @update_ff 已经执行
         compareStatistics();
     }
 
@@ -403,22 +404,16 @@ LSQUnitComparison::writebackStores()
 
     bool wasStalled = LSQUnit::isStalled();
 
-    // 调用基类实现（Gem5）
     LSQUnit::writebackStores();
 
-    // 检测 C++ 侧的 replay 调用（stall 解除意味着 replay 发生）
-    // 注意：无法直接获取被 replay 的 load 的 seq_num，
-    // 因为 stallingLoadIdx 是 private 的
     if (mockIQ && wasStalled && !LSQUnit::isStalled()) {
-        mockIQ->recordCPReplay(callCycle, 0);
+        mockIQ->recordCPReplay(callCycle, stallingLoadSeqNum);
+        stallingLoadSeqNum = 0;
     }
 
-    // 对比 IQ 调用记录
     if (pymtl3Available && pymtl3LSQ) {
         compareIQCalls();
     }
-
-    // PyMTL3 不需要显式写回
 }
 
 void

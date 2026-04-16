@@ -39,7 +39,7 @@ namespace o3 {
 // pybind11 绑定函数前向声明 - 只在对比模式启用时声明
 void init_pymtl3_module();
 void* create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries);
-bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault);
+bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_strictly_ordered);
 bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault);
 int pymtl3_execute_load(void* lsq, int lq_idx);
 int pymtl3_execute_store(void* lsq, int sq_idx);
@@ -101,6 +101,10 @@ void pymtl3_tick(void* lsq);
 int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
 void pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
+
+void pymtl3_update_load_phys_addr(void* lsq, uint64_t seq_num, uint64_t paddr);
+void pymtl3_update_load_strictly_ordered(void* lsq, uint64_t seq_num, bool is_strictly_ordered);
+void pymtl3_update_load_at_commit(void* lsq, uint64_t seq_num, bool is_at_commit);
 void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size,
                                const uint8_t* data, uint32_t data_size, bool is_all_zeros);
 void pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num);
@@ -340,6 +344,9 @@ class LSQUnitComparison : public LSQUnit
 
     /** Mismatch counter */
     uint64_t mismatchCount;
+
+    /** Stalling load's sequence number (for replay detection) */
+    uint64_t stallingLoadSeqNum;
 
     /** Mock DCache port for capturing output calls */
     MockDCachePort* mockDCache;
