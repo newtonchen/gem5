@@ -112,7 +112,8 @@ void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32
                                const uint8_t* data, uint32_t data_size, bool is_all_zeros);
 void pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num);
 void pymtl3_send_dcache_resp(void* lsq, uint64_t seq_num,
-                              const uint8_t* data, uint32_t data_size);
+                              const uint8_t* data, uint32_t data_size,
+                              bool is_write = false);
 void pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num);
 
 // ===== Writeback 回调函数 =====

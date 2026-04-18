@@ -385,11 +385,6 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 
     bool wasStalled = LSQUnit::isStalled();
 
-    // CRITICAL: Save address info BEFORE executeLoad
-    // because executeLoad may set effAddrValid(false) internally
-    // and we need this info to pass to PyMTL3 for partial coverage detection
-    bool savedEffAddrValid = inst->effAddrValid();
-    Addr savedEffAddr = inst->effAddr;
     uint32_t savedEffSize = inst->effSize;
 
     Fault result = LSQUnit::executeLoad(inst);
@@ -411,24 +406,18 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 
         if (!inst->isExecuted()) {
             // Calculate vaddr for TLB translation in PyMTL3
-            // If effAddrValid is false, we need to compute vaddr from base reg + offset
-            Addr vaddr = savedEffAddr;
-            if (!savedEffAddrValid) {
-                // For RISC-V load instructions, vaddr = base_reg + offset
-                // Try to calculate vaddr from instruction
-                vaddr = calculateLoadVaddr(inst);
-                DPRINTF(PyMTL3, "executeLoad sn=%llu: effAddr not valid, computed vaddr=0x%llx\n",
-                        seq_num, vaddr);
-            }
+            Addr vaddr = calculateLoadVaddr(inst);
+            bool vaddrValid = true;
+            DPRINTF(PyMTL3, "executeLoad sn=%llu: computed vaddr=0x%llx\n",
+                    seq_num, vaddr);
 
             // Pass all necessary information directly to execute_load
-            // including strictlyOrdered, isAtCommit, effAddr (or vaddr), and effSize
-            // Use saved values because executeLoad may invalidate them
-            // When effAddrValid is false, eff_addr parameter contains vaddr for PyMTL3 TLB
+            // including strictlyOrdered, isAtCommit, vaddr, and effSize
+            // vaddr is always computed from instruction, not relying on savedEffAddr
             int py_fault = pymtl3_execute_load(pymtl3LSQ,
                 (uint64_t)seq_num, (int)lq_idx,
                 (bool)inst->strictlyOrdered(), (bool)inst->isAtCommit(),
-                (uint64_t)vaddr, (bool)savedEffAddrValid,
+                (uint64_t)vaddr, (bool)vaddrValid,
                 (int)savedEffSize);
 
             if ((result == NoFault && py_fault != 0) ||
@@ -451,11 +440,6 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 Fault
 LSQUnitComparison::executeStore(const DynInstPtr &inst)
 {
-    // CRITICAL: Save address info BEFORE executeStore
-    // because executeStore may set effAddrValid internally
-    // and we need this info to pass to PyMTL3 for TLB translation
-    bool savedEffAddrValid = inst->effAddrValid();
-    Addr savedEffAddr = inst->effAddr;
     uint32_t savedEffSize = inst->effSize;
     InstSeqNum seq_num = inst->seqNum;
     int sq_idx = inst->sqIdx;
@@ -466,33 +450,48 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
     // 如果 PyMTL3 可用，更新 store 地址并调用 PyMTL3 实现
     if (pymtl3Available && pymtl3LSQ) {
         // Calculate vaddr for TLB translation in PyMTL3
-        // If effAddrValid is false, we need to compute vaddr from base reg + offset
-        Addr vaddr = savedEffAddr;
-        if (!savedEffAddrValid) {
-            // For RISC-V store instructions, vaddr = base_reg + offset
-            // Try to calculate vaddr from instruction
-            vaddr = calculateStoreVaddr(inst);
-            DPRINTF(PyMTL3, "executeStore sn=%llu: effAddr not valid, computed vaddr=0x%llx\n",
-                    seq_num, vaddr);
-        }
+        Addr vaddr = calculateStoreVaddr(inst);
+        bool vaddrValid = true;
+        DPRINTF(PyMTL3, "executeStore sn=%llu: computed vaddr=0x%llx\n",
+                seq_num, vaddr);
         
-        // Get Store data from store queue
+        // Get Store data and size from store queue AFTER executeStore
+        // because executeStore (via initiateAcc) sets up the store queue entry
         const uint8_t* store_data = nullptr;
         bool is_all_zeros = false;
+        uint32_t actual_data_size = 0;
         if (sq_idx >= 0 && sq_idx < storeQueue.capacity()) {
             auto& sq_entry = storeQueue[sq_idx];
             if (sq_entry.valid()) {
                 store_data = reinterpret_cast<const uint8_t*>(sq_entry.data());
                 is_all_zeros = sq_entry.isAllZeros();
+                actual_data_size = sq_entry.size();
+                // Safety check: ensure data pointer is valid
+                if (store_data == nullptr) {
+                    DPRINTF(PyMTL3, "executeStore sn=%llu: store_data is null, setting size to 0\n", seq_num);
+                    actual_data_size = 0;
+                }
             }
         }
+        
+        // Use actual data size from store queue, not savedEffSize
+        // savedEffSize may be 0 if address calculation failed (before executeStore)
+        // After executeStore, actual_data_size should have the correct size
+        // IMPORTANT: If store_data is null, must pass size=0 to avoid crash
+        uint32_t eff_size_to_pass = actual_data_size;
+        if (eff_size_to_pass == 0 && savedEffSize > 0) {
+            eff_size_to_pass = savedEffSize;  // fallback to saved size if actual is 0
+        }
+        
+        DPRINTF(PyMTL3, "executeStore sn=%llu: store_data=%p, actual_size=%u, saved_size=%u, passing_size=%u\n",
+                seq_num, store_data, actual_data_size, savedEffSize, eff_size_to_pass);
         
         // Call PyMTL3 execute_store with all necessary information
         // including vaddr (or effAddr), data, and flags
         // When effAddrValid is false, vaddr contains the virtual address for PyMTL3 TLB
         int py_fault = pymtl3_execute_store(pymtl3LSQ, seq_num, sq_idx,
-                                            vaddr, savedEffAddrValid, savedEffSize,
-                                            store_data, savedEffSize, is_all_zeros);
+                                            vaddr, vaddrValid, eff_size_to_pass,
+                                            store_data, eff_size_to_pass, is_all_zeros);
         
         // 对比结果
         if ((result == NoFault && py_fault != 0) || 
@@ -660,13 +659,20 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
         mockDCache->recordCPCall(callCycle, pkt, "completeDataAccess");
     }
 
-    // 3. 发送 DCache 响应给 PyMTL3（如果是 Load 且需要写回）
-    if (pymtl3Available && pymtl3LSQ && inst->isLoad() && needWB && !isSquashed) {
-        // 获取响应数据
-        const uint8_t* data = pkt->getConstPtr<uint8_t>();
-        uint32_t data_size = pkt->getSize();
-        
-        pymtl3_send_dcache_resp(pymtl3LSQ, inst->seqNum, data, data_size);
+    // 3. 发送 DCache 响应给 PyMTL3（Load 或 Store）
+    // Load: needWB 为 true 时写回数据
+    // Store: 总是需要通知完成（即使 needWB 为 false），以便 PyMTL3 从 queue 中移除
+    if (pymtl3Available && pymtl3LSQ && !isSquashed) {
+        if (inst->isLoad() && needWB) {
+            // Load: 获取响应数据
+            const uint8_t* data = pkt->getConstPtr<uint8_t>();
+            uint32_t data_size = pkt->getSize();
+            pymtl3_send_dcache_resp(pymtl3LSQ, inst->seqNum, data, data_size, false);
+        } else if (inst->isStore()) {
+            // Store: 通知完成，以便 PyMTL3 从 queue 中移除 entry
+            // Store 的 needWBToRegister() 通常为 false，但仍需要通知 PyMTL3
+            pymtl3_send_dcache_resp(pymtl3LSQ, inst->seqNum, nullptr, 0, true);
+        }
     }
 
     // 4. 调用基类实现（Gem5）
