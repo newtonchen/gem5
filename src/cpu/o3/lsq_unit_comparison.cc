@@ -261,6 +261,13 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 
     bool wasStalled = LSQUnit::isStalled();
 
+    // CRITICAL: Save address info BEFORE executeLoad
+    // because executeLoad may set effAddrValid(false) internally
+    // and we need this info to pass to PyMTL3 for partial coverage detection
+    bool savedEffAddrValid = inst->effAddrValid();
+    Addr savedEffAddr = inst->effAddr;
+    uint32_t savedEffSize = inst->effSize;
+
     Fault result = LSQUnit::executeLoad(inst);
 
     if (pymtl3Available && pymtl3LSQ) {
@@ -279,24 +286,14 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
         }
 
         if (!inst->isExecuted()) {
-            if (inst->effAddrValid()) {
-                pymtl3_update_load_addr(pymtl3LSQ, seq_num, inst->effAddr, inst->effSize);
-            }
-
-            if (inst->physEffAddr != 0) {
-                pymtl3_update_load_phys_addr(pymtl3LSQ, seq_num, inst->physEffAddr);
-            }
-
-            if (inst->strictlyOrdered()) {
-                pymtl3_update_load_strictly_ordered(pymtl3LSQ, seq_num, true);
-            }
-
-            pymtl3_update_load_at_commit(pymtl3LSQ, seq_num, inst->isAtCommit());
-
-            int fault = (inst->getFault() != NoFault) ? 1 : 0;
-            pymtl3_update_load_inst_fault(pymtl3LSQ, lq_idx, fault, seq_num);
-
-            int py_fault = pymtl3_execute_load(pymtl3LSQ, seq_num, lq_idx);
+            // Pass all necessary information directly to execute_load
+            // including strictlyOrdered, isAtCommit, effAddr, and effSize
+            // Use saved values because executeLoad may invalidate them
+            int py_fault = pymtl3_execute_load(pymtl3LSQ,
+                (uint64_t)seq_num, (int)lq_idx,
+                (bool)inst->strictlyOrdered(), (bool)inst->isAtCommit(),
+                (uint64_t)(savedEffAddrValid ? savedEffAddr : 0),
+                (int)savedEffSize);
 
             if ((result == NoFault && py_fault != 0) ||
                 (result != NoFault && py_fault == 0)) {
@@ -384,7 +381,7 @@ LSQUnitComparison::commitLoads(InstSeqNum &youngest_inst)
 
     // 如果 PyMTL3 可用，调用 PyMTL3 实现
     if (pymtl3Available && pymtl3LSQ) {
-        pymtl3_commit_stores(pymtl3LSQ, youngest_inst);
+        pymtl3_commit_load(pymtl3LSQ);
         // 注意：队列状态比较在 LSQ::tick() 中统一进行
     }
 }

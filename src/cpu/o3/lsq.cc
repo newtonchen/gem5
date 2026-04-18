@@ -250,16 +250,16 @@ LSQ::tick()
 
 #ifdef LSQ_COMPARISON_MODE
     // Tick PyMTL3 LSQUnitCL to keep it in sync with Gem5
-    // Call pymtl3_tick() once per cycle to ensure both models
-    // execute the same number of cycles (synchronization by tick count)
+    DPRINTF(PyMTL3, "Calling Tick %lu.\n", cpu->baseStats.numCycles.value());
+
     for (auto& t : thread) {
         auto* comparisonUnit = dynamic_cast<LSQUnitComparison*>(t.get());
         if (comparisonUnit && comparisonUnit->getPyMTL3LSQ()) {
             // Check if PyMTL3 debug flag is enabled and sync to PyMTL3
             bool debug_enabled = debug::PyMTL3;
             pymtl3_set_debug_enabled(comparisonUnit->getPyMTL3LSQ(), debug_enabled);
-            
-            pymtl3_tick(comparisonUnit->getPyMTL3LSQ());
+
+            pymtl3_tick(comparisonUnit->getPyMTL3LSQ(), cpu->baseStats.numCycles.value());
             // Note: We no longer compare queue states here
             // Comparison is now focused on interface calls, not internal states
         }

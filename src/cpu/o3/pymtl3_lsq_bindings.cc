@@ -250,32 +250,6 @@ pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint3
 }
 
 /**
- * Call execute_load on PyMTL3 LSQUnitCL.
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param lq_idx Load queue index.
- * @return Fault value (as int).
- */
-int
-pymtl3_execute_load(void* lsq, int lq_idx)
-{
-    if (!lsq) {
-        return 0;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        int fault = (*wrapper).attr("execute_load")(lq_idx).cast<int>();
-        return fault;
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-        return 0;
-    }
-}
-
-/**
  * Call execute_store on PyMTL3 LSQUnitCL.
  * @param lsq Pointer to PyMTL3 wrapper instance.
  * @param sq_idx Store queue index.
@@ -661,7 +635,7 @@ pymtl3_get_cycle(void* lsq)
  * @param lsq Pointer to PyMTL3 wrapper instance.
  */
 void
-pymtl3_tick(void* lsq)
+pymtl3_tick(void* lsq, uint64_t current_cycle)
 {
     if (!lsq) {
         return;
@@ -672,7 +646,8 @@ pymtl3_tick(void* lsq)
         
         // Call tick without parameters - PyMTL3 will increment its own cycle counter
         // This ensures synchronization by tick count, not by cycle value
-        (*wrapper).attr("tick")();
+
+        (*wrapper).attr("tick")(current_cycle);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in tick: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
@@ -862,10 +837,16 @@ pymtl3_record_reschedule_call(void* lsq, uint64_t seq_num)
  * @param lsq Pointer to PyMTL3 wrapper instance.
  * @param seq_num Instruction sequence number.
  * @param lq_idx Load queue index.
+ * @param strictly_ordered Whether the load is strictly ordered.
+ * @param is_at_commit Whether the load is at commit stage.
+ * @param eff_addr Effective address (virtual address after TLB translation).
+ * @param eff_size Effective address size.
  * @return Fault code (0 = NoFault).
  */
 int
-pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx)
+pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
+                     bool strictly_ordered, bool is_at_commit,
+                     uint64_t eff_addr, int eff_size)
 {
     if (!lsq) {
         return 0;  // NoFault
@@ -873,8 +854,8 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx)
 
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
-        // 传递 seq_num 和 lq_idx，让 Python 端通过 seq_num 找到正确的 entry
-        int fault = (*wrapper).attr("execute_load")(seq_num, lq_idx).cast<int>();
+        int fault = (*wrapper).attr("execute_load")(seq_num, lq_idx,
+            strictly_ordered, is_at_commit, eff_addr, eff_size).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;

@@ -41,7 +41,6 @@ void init_pymtl3_module();
 void* create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries);
 bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_strictly_ordered);
 bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault);
-int pymtl3_execute_load(void* lsq, int lq_idx);
 int pymtl3_execute_store(void* lsq, int sq_idx);
 void* pymtl3_commit_load(void* lsq);
 int pymtl3_commit_stores(void* lsq, uint64_t youngest_sn);
@@ -97,8 +96,10 @@ uint64_t pymtl3_translate_address(void* lsq, uint64_t vaddr);
 void pymtl3_set_tlb_callback(void* lsq, uint64_t (*callback)(uint64_t));
 
 uint64_t pymtl3_get_cycle(void* lsq);
-void pymtl3_tick(void* lsq);
-int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx);
+void pymtl3_tick(void* lsq, uint64_t current_cycle);
+int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
+                         bool strictly_ordered, bool is_at_commit,
+                         uint64_t eff_addr, int eff_size);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
 void pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
 

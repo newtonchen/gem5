@@ -1383,6 +1383,9 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
     // only if they're at the head of the LSQ and are ready to commit
     // (at the head of the ROB too).
 
+    DPRINTF(LSQUnit, "StrictlyOrdered check [sn:%lli] request->mainReq()->isStrictlyOrdered()=%d, load_idx=%d, head=%d, isAtCommit=%d\n",
+            load_inst->seqNum, request->mainReq()->isStrictlyOrdered(),
+            load_idx, loadQueue.head(), load_inst->isAtCommit());
     if (request->mainReq()->isStrictlyOrdered() &&
         (load_idx != loadQueue.head() || !load_inst->isAtCommit())) {
         // Tell IQ/mem dep unit that this instruction will need to be
@@ -1602,6 +1605,8 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
 
                 // Tell IQ/mem dep unit that this instruction will need to be
                 // rescheduled eventually
+                DPRINTF(LSQUnit, "RESCHEDULE [sn:%lli] at idx=%d due to partial coverage\n",
+                        load_inst->seqNum, load_idx);
                 iewStage->rescheduleMemInst(load_inst);
                 load_inst->clearIssued();
                 load_inst->effAddrValid(false);
