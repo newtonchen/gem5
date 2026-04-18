@@ -104,6 +104,13 @@ init_pymtl3_module()
             gem5_pymtl3_module->attr("PyMTL3LSQWrapper")
         );
 
+        // Inject unified print function into Python module
+        py::cpp_function py_print_func = [](const std::string& message) {
+            pymtl3_print(message);
+        };
+        gem5_pymtl3_module->attr("pymtl3_print") = py_print_func;
+        std::cout << "[LSQComparison] Injected pymtl3_print function into Python module" << std::endl;
+
         std::cout << "[LSQComparison] PyMTL3 module initialization complete" << std::endl;
 
     } catch (const py::error_already_set& e) {
@@ -770,6 +777,20 @@ pymtl3_record_pymtl3_tlb_call(void* lsq, uint64_t seq_num, uint64_t vaddr,
 }
 
 /**
+ * Unified print function for PyMTL3.
+ * This allows PyMTL3 to print messages through C++'s output mechanism,
+ * ensuring synchronized output with gem5's DPRINTF.
+ *
+ * @param message Message string to print.
+ */
+void
+pymtl3_print(const std::string& message)
+{
+    std::cout << message << std::endl;
+    std::cout.flush();
+}
+
+/**
  * Record a replay call from PyMTL3 LSQUnitCL.
  * This is called from Python when PyMTL3 wants to replay an instruction.
  *
@@ -846,7 +867,7 @@ pymtl3_record_reschedule_call(void* lsq, uint64_t seq_num)
 int
 pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
                      bool strictly_ordered, bool is_at_commit,
-                     uint64_t eff_addr, int eff_size)
+                     uint64_t eff_addr, bool eff_addr_valid, int eff_size)
 {
     if (!lsq) {
         return 0;  // NoFault
@@ -855,7 +876,7 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
         int fault = (*wrapper).attr("execute_load")(seq_num, lq_idx,
-            strictly_ordered, is_at_commit, eff_addr, eff_size).cast<int>();
+            strictly_ordered, is_at_commit, eff_addr, eff_addr_valid, eff_size).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;
@@ -872,10 +893,18 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
  * @param lsq Pointer to PyMTL3 wrapper instance.
  * @param seq_num Instruction sequence number.
  * @param sq_idx Store queue index.
+ * @param eff_addr Effective address (or vaddr if eff_addr_valid is false).
+ * @param eff_addr_valid Whether eff_addr is a valid physical address.
+ * @param eff_size Access size in bytes.
+ * @param data Store data buffer.
+ * @param data_size Size of data buffer.
+ * @param is_all_zeros Whether data is all zeros.
  * @return Fault code (0 = NoFault).
  */
 int
-pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx)
+pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
+                     uint64_t eff_addr, bool eff_addr_valid, int eff_size,
+                     const uint8_t* data, uint32_t data_size, bool is_all_zeros)
 {
     if (!lsq) {
         return 0;  // NoFault
@@ -883,7 +912,17 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx)
 
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
-        int fault = (*wrapper).attr("execute_store")(sq_idx).cast<int>();
+        
+        // Convert data to Python bytes
+        py::bytes py_data;
+        if (data && data_size > 0) {
+            py_data = py::bytes(reinterpret_cast<const char*>(data), data_size);
+        }
+        
+        int fault = (*wrapper).attr("execute_store")(
+            seq_num, sq_idx,
+            eff_addr, eff_addr_valid, eff_size,
+            py_data, data_size, is_all_zeros).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_store: " << e.what() << std::endl;

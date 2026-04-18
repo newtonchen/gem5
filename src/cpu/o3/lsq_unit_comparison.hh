@@ -99,8 +99,10 @@ uint64_t pymtl3_get_cycle(void* lsq);
 void pymtl3_tick(void* lsq, uint64_t current_cycle);
 int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
                          bool strictly_ordered, bool is_at_commit,
-                         uint64_t eff_addr, int eff_size);
-int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx);
+                         uint64_t eff_addr, bool eff_addr_valid, int eff_size);
+int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
+                          uint64_t eff_addr, bool eff_addr_valid, int eff_size,
+                          const uint8_t* data, uint32_t data_size, bool is_all_zeros);
 void pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
 
 void pymtl3_update_load_phys_addr(void* lsq, uint64_t seq_num, uint64_t paddr);
@@ -138,6 +140,15 @@ void pymtl3_set_writeback_callback(void* lsq,
  */
 void pymtl3_set_iq_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, const std::string&));
+
+/**
+ * Unified print function for PyMTL3.
+ * This allows PyMTL3 to print messages through C++'s output mechanism,
+ * ensuring synchronized output with gem5's DPRINTF.
+ *
+ * @param message Message string to print.
+ */
+void pymtl3_print(const std::string& message);
 
 /**
  * Set debug mode for PyMTL3 LSQUnitCL.
@@ -180,6 +191,20 @@ class LSQUnitComparison : public LSQUnit
 
     /** Returns the name of the LSQ unit. */
     std::string name() const;
+
+    /**
+     * Calculate virtual address for load instructions.
+     * This is called before TLB translation to get vaddr for PyMTL3.
+     * For RISC-V load instructions: vaddr = base_reg + sext(offset)
+     */
+    Addr calculateLoadVaddr(const DynInstPtr &inst);
+
+    /**
+     * Calculate virtual address for store instructions.
+     * This is called before TLB translation to get vaddr for PyMTL3.
+     * For RISC-V store instructions: vaddr = base_reg + sext(offset)
+     */
+    Addr calculateStoreVaddr(const DynInstPtr &inst);
 
     // ==== 包装方法 - 并行调用和对比 ====
 

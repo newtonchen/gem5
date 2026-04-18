@@ -202,6 +202,130 @@ LSQUnitComparison::name() const
     return csprintf("%s.comparison", LSQUnit::name());
 }
 
+// Helper function to calculate virtual address for load instructions
+// This is called before TLB translation to get vaddr for PyMTL3
+Addr
+LSQUnitComparison::calculateLoadVaddr(const DynInstPtr &inst)
+{
+    // Try to extract vaddr from instruction
+    // For RISC-V: vaddr = base_reg + sext(offset)
+    
+    // Check if this is a load instruction
+    if (!inst->isLoad()) {
+        return 0;
+    }
+    
+    // Get the static instruction
+    auto staticInst = inst->staticInst;
+    if (!staticInst) {
+        return 0;
+    }
+    
+    // For RISC-V, we need to get:
+    // 1. Base register value (Rs1)
+    // 2. Offset (imm12 from machInst)
+    
+    // Try to read base register value
+    // Load instructions have at least 1 source register (base address)
+    Addr base_val = 0;
+    if (inst->numSrcRegs() > 0) {
+        // Get the first source register value (Rs1 for RISC-V load)
+        // Note: This assumes the first source reg is the base address
+        RegVal reg_val = inst->getRegOperand(staticInst.get(), 0);
+        base_val = static_cast<Addr>(reg_val);
+    }
+    
+    // Try to extract offset from instruction encoding
+    // For RISC-V I-type load instructions: offset = machInst[31:20]
+    int64_t offset = 0;
+    
+    // Access machInst through the RiscvStaticInst
+    // We need to use the getMachInst method or access it directly
+    // Since RiscvStaticInst has public machInst member
+    
+    // Check if we can get the extended machine instruction
+    uint64_t machInst = staticInst->getEMI();
+    
+    // Extract 12-bit immediate from bits [31:20]
+    // Sign extend to 64 bits
+    int32_t imm12 = (machInst >> 20) & 0xFFF;
+    if (imm12 & 0x800) {
+        // Sign extend
+        imm12 |= 0xFFFFF000;
+    }
+    offset = static_cast<int64_t>(imm12);
+    
+    DPRINTF(PyMTL3, "calculateLoadVaddr: base=0x%llx, offset=%d (0x%x), raw_inst=0x%x\n",
+            base_val, offset, imm12, (uint32_t)machInst);
+    
+    // Calculate vaddr with sign extension
+    Addr vaddr = base_val + static_cast<Addr>(offset);
+    
+    return vaddr;
+}
+
+// Helper function to calculate virtual address for store instructions
+// This is called before TLB translation to get vaddr for PyMTL3
+// For RISC-V store instructions: vaddr = base_reg + sext(offset)
+// Store uses S-type format: offset[11:5] in machInst[31:25], offset[4:0] in machInst[11:7]
+Addr
+LSQUnitComparison::calculateStoreVaddr(const DynInstPtr &inst)
+{
+    // Try to extract vaddr from instruction
+    // For RISC-V: vaddr = base_reg + sext(offset)
+    
+    // Check if this is a store instruction
+    if (!inst->isStore()) {
+        return 0;
+    }
+    
+    // Get the static instruction
+    auto staticInst = inst->staticInst;
+    if (!staticInst) {
+        return 0;
+    }
+    
+    // For RISC-V store, we need to get:
+    // 1. Base register value (Rs1) - first source reg
+    // 2. Offset (S-type immediate from machInst)
+    
+    // Try to read base register value
+    // Store instructions have at least 1 source register (base address)
+    Addr base_val = 0;
+    if (inst->numSrcRegs() > 0) {
+        // Get the first source register value (Rs1 for RISC-V store)
+        RegVal reg_val = inst->getRegOperand(staticInst.get(), 0);
+        base_val = static_cast<Addr>(reg_val);
+    }
+    
+    // Try to extract offset from instruction encoding
+    // For RISC-V S-type store instructions:
+    // offset[11:5] = machInst[31:25]
+    // offset[4:0]  = machInst[11:7]
+    int64_t offset = 0;
+    
+    // Check if we can get the extended machine instruction
+    uint64_t machInst = staticInst->getEMI();
+    
+    // Extract 12-bit immediate from S-type format
+    int32_t imm12 = ((machInst >> 25) & 0x7F) << 5 |   // imm[11:5] from machInst[31:25]
+                    ((machInst >> 7) & 0x1F);           // imm[4:0] from machInst[11:7]
+    
+    // Sign extend to 64 bits
+    if (imm12 & 0x800) {
+        imm12 |= 0xFFFFF000;
+    }
+    offset = static_cast<int64_t>(imm12);
+    
+    DPRINTF(PyMTL3, "calculateStoreVaddr: base=0x%llx, offset=%d (0x%x), raw_inst=0x%x\n",
+            base_val, offset, imm12, (uint32_t)machInst);
+    
+    // Calculate vaddr with sign extension
+    Addr vaddr = base_val + static_cast<Addr>(offset);
+    
+    return vaddr;
+}
+
 // ==== 包装方法实现 ====
 
 void
@@ -286,13 +410,25 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
         }
 
         if (!inst->isExecuted()) {
+            // Calculate vaddr for TLB translation in PyMTL3
+            // If effAddrValid is false, we need to compute vaddr from base reg + offset
+            Addr vaddr = savedEffAddr;
+            if (!savedEffAddrValid) {
+                // For RISC-V load instructions, vaddr = base_reg + offset
+                // Try to calculate vaddr from instruction
+                vaddr = calculateLoadVaddr(inst);
+                DPRINTF(PyMTL3, "executeLoad sn=%llu: effAddr not valid, computed vaddr=0x%llx\n",
+                        seq_num, vaddr);
+            }
+
             // Pass all necessary information directly to execute_load
-            // including strictlyOrdered, isAtCommit, effAddr, and effSize
+            // including strictlyOrdered, isAtCommit, effAddr (or vaddr), and effSize
             // Use saved values because executeLoad may invalidate them
+            // When effAddrValid is false, eff_addr parameter contains vaddr for PyMTL3 TLB
             int py_fault = pymtl3_execute_load(pymtl3LSQ,
                 (uint64_t)seq_num, (int)lq_idx,
                 (bool)inst->strictlyOrdered(), (bool)inst->isAtCommit(),
-                (uint64_t)(savedEffAddrValid ? savedEffAddr : 0),
+                (uint64_t)vaddr, (bool)savedEffAddrValid,
                 (int)savedEffSize);
 
             if ((result == NoFault && py_fault != 0) ||
@@ -315,18 +451,32 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 Fault
 LSQUnitComparison::executeStore(const DynInstPtr &inst)
 {
+    // CRITICAL: Save address info BEFORE executeStore
+    // because executeStore may set effAddrValid internally
+    // and we need this info to pass to PyMTL3 for TLB translation
+    bool savedEffAddrValid = inst->effAddrValid();
+    Addr savedEffAddr = inst->effAddr;
+    uint32_t savedEffSize = inst->effSize;
+    InstSeqNum seq_num = inst->seqNum;
+    int sq_idx = inst->sqIdx;
+    
     // 调用基类实现（Gem5）
     Fault result = LSQUnit::executeStore(inst);
 
     // 如果 PyMTL3 可用，更新 store 地址并调用 PyMTL3 实现
     if (pymtl3Available && pymtl3LSQ) {
-        // Store 执行后，地址和大小已经计算完成
-        InstSeqNum seq_num = inst->seqNum;
-        int sq_idx = inst->sqIdx;
-        Addr ea = inst->effAddr;
-        uint32_t size = inst->effSize;
+        // Calculate vaddr for TLB translation in PyMTL3
+        // If effAddrValid is false, we need to compute vaddr from base reg + offset
+        Addr vaddr = savedEffAddr;
+        if (!savedEffAddrValid) {
+            // For RISC-V store instructions, vaddr = base_reg + offset
+            // Try to calculate vaddr from instruction
+            vaddr = calculateStoreVaddr(inst);
+            DPRINTF(PyMTL3, "executeStore sn=%llu: effAddr not valid, computed vaddr=0x%llx\n",
+                    seq_num, vaddr);
+        }
         
-        // 获取 Store 数据
+        // Get Store data from store queue
         const uint8_t* store_data = nullptr;
         bool is_all_zeros = false;
         if (sq_idx >= 0 && sq_idx < storeQueue.capacity()) {
@@ -337,12 +487,12 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
             }
         }
         
-        // 1. 更新 PyMTL3 中的 store 地址和数据
-        pymtl3_update_store_addr(pymtl3LSQ, seq_num, ea, size, 
-                                 store_data, size, is_all_zeros);
-        
-        // 2. 调用 PyMTL3 的 execute_store
-        int py_fault = pymtl3_execute_store(pymtl3LSQ, seq_num, sq_idx);
+        // Call PyMTL3 execute_store with all necessary information
+        // including vaddr (or effAddr), data, and flags
+        // When effAddrValid is false, vaddr contains the virtual address for PyMTL3 TLB
+        int py_fault = pymtl3_execute_store(pymtl3LSQ, seq_num, sq_idx,
+                                            vaddr, savedEffAddrValid, savedEffSize,
+                                            store_data, savedEffSize, is_all_zeros);
         
         // 对比结果
         if ((result == NoFault && py_fault != 0) || 
