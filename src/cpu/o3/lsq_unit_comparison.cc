@@ -457,19 +457,24 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
         
         // Get Store data and size from store queue AFTER executeStore
         // because executeStore (via initiateAcc) sets up the store queue entry
-        const uint8_t* store_data = nullptr;
-        bool is_all_zeros = false;
+        static uint8_t zero_data[32] = {0};  // Static zero data for null case
+        const uint8_t* store_data = zero_data;
+        bool is_all_zeros = true;
         uint32_t actual_data_size = 0;
         if (sq_idx >= 0 && sq_idx < storeQueue.capacity()) {
             auto& sq_entry = storeQueue[sq_idx];
             if (sq_entry.valid()) {
-                store_data = reinterpret_cast<const uint8_t*>(sq_entry.data());
-                is_all_zeros = sq_entry.isAllZeros();
-                actual_data_size = sq_entry.size();
-                // Safety check: ensure data pointer is valid
-                if (store_data == nullptr) {
-                    DPRINTF(PyMTL3, "executeStore sn=%llu: store_data is null, setting size to 0\n", seq_num);
-                    actual_data_size = 0;
+                const uint8_t* raw_data = reinterpret_cast<const uint8_t*>(sq_entry.data());
+                if (raw_data != nullptr) {
+                    store_data = raw_data;
+                    is_all_zeros = sq_entry.isAllZeros();
+                    actual_data_size = sq_entry.size();
+                } else {
+                    DPRINTF(PyMTL3, "executeStore sn=%llu: store_data is null, using zero data\n", seq_num);
+                    actual_data_size = sq_entry.size();
+                    if (actual_data_size == 0) {
+                        actual_data_size = savedEffSize;
+                    }
                 }
             }
         }
@@ -477,7 +482,6 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
         // Use actual data size from store queue, not savedEffSize
         // savedEffSize may be 0 if address calculation failed (before executeStore)
         // After executeStore, actual_data_size should have the correct size
-        // IMPORTANT: If store_data is null, must pass size=0 to avoid crash
         uint32_t eff_size_to_pass = actual_data_size;
         if (eff_size_to_pass == 0 && savedEffSize > 0) {
             eff_size_to_pass = savedEffSize;  // fallback to saved size if actual is 0
