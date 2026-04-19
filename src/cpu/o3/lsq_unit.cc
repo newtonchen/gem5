@@ -1504,6 +1504,24 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                         lower_load_has_store_part, upper_load_has_store_part,
                         request->mainReq()->isLLSC());
             }
+            
+            // Debug for sn=12279 - detailed forwarding check info
+            if (load_inst->seqNum == 12279) {
+                DPRINTF(LSQUnit, "[DEBUG sn=12279] Checking store sn=%llu: "
+                        "st_s=0x%llx, st_e=0x%llx, store_size=%d, isAtomic=%d, "
+                        "isMasked=%d, completed=%d, strictlyOrdered=%d\n",
+                        store_it->instruction()->seqNum, st_s, st_e, store_size,
+                        store_it->instruction()->isAtomic(),
+                        store_it->request()->mainReq() ? store_it->request()->mainReq()->isMasked() : -1,
+                        store_it->completed(),
+                        store_it->instruction()->strictlyOrdered());
+                DPRINTF(LSQUnit, "[DEBUG sn=12279] Conditions: "
+                        "lower=%d, upper=%d, low_part=%d, up_part=%d, "
+                        "isLLSC=%d\n",
+                        store_has_lower_limit, store_has_upper_limit,
+                        lower_load_has_store_part, upper_load_has_store_part,
+                        request->mainReq()->isLLSC());
+            }
 
             auto coverage = AddrRangeCoverage::NoAddrRangeCoverage;
 
@@ -1523,6 +1541,13 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                 // Debug for sn=3444
                 if (load_inst->seqNum == 3444) {
                     DPRINTF(LSQUnit, "[DEBUG sn=3444] Full coverage check PASSED. "
+                            "isMasked=%d, coverage=%d (1=No, 2=Partial, 3=Full)\n",
+                            store_req->isMasked(), (int)coverage);
+                }
+                
+                // Debug for sn=12279
+                if (load_inst->seqNum == 12279) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=12279] Full coverage check PASSED. "
                             "isMasked=%d, coverage=%d (1=No, 2=Partial, 3=Full)\n",
                             store_req->isMasked(), (int)coverage);
                 }
@@ -1552,10 +1577,23 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                             "store sn=%llu\n",
                             store_it->instruction()->seqNum);
                 }
+                
+                // Debug for sn=12279
+                if (load_inst->seqNum == 12279) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=12279] PARTIAL COVERAGE DETECTED! "
+                            "store sn=%llu\n",
+                            store_it->instruction()->seqNum);
+                }
             } else {
                 // Debug for sn=3444
                 if (load_inst->seqNum == 3444) {
                     DPRINTF(LSQUnit, "[DEBUG sn=3444] No coverage for store sn=%llu\n",
+                            store_it->instruction()->seqNum);
+                }
+                
+                // Debug for sn=12279
+                if (load_inst->seqNum == 12279) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=12279] No coverage for store sn=%llu\n",
                             store_it->instruction()->seqNum);
                 }
             }

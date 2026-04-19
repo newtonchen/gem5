@@ -370,7 +370,10 @@ LSQUnitComparison::insertStore(const DynInstPtr &store_inst)
 
         DPRINTF(PyMTL3, "insertStore sn=%llu: size=%u (effSize=%u)\n", seq_num, size, store_inst->effSize);
 
-        pymtl3_insert_store(pymtl3LSQ, seq_num, pc, ea, size, fault);
+        // 获取 is_atomic 标志
+        bool is_atomic = store_inst->isAtomic();
+        
+        pymtl3_insert_store(pymtl3LSQ, seq_num, pc, ea, size, fault, is_atomic);
 
         // 注意：队列状态比较在 LSQ::tick() 中统一进行
         // 以确保 PyMTL3 的 @update_ff 已经执行
@@ -638,6 +641,12 @@ LSQUnitComparison::writebackStores()
     uint64_t callCycle = curTick();
 
     bool wasStalled = LSQUnit::isStalled();
+
+    // First, let PyMTL3 process store writebacks to ensure synchronization
+    // This ensures PyMTL3 and C++ process stores in the same cycle
+    if (pymtl3Available && pymtl3LSQ) {
+        pymtl3_process_store_writebacks(pymtl3LSQ);
+    }
 
     LSQUnit::writebackStores();
 

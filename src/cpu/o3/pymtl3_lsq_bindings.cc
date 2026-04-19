@@ -215,10 +215,11 @@ pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32
  * @param ea Effective address.
  * @param size Access size.
  * @param fault Fault status from earlier pipeline stages (0 = NoFault).
+ * @param is_atomic Whether the instruction is atomic.
  * @return True if successful.
  */
 bool
-pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault)
+pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_atomic)
 {
     if (!lsq) {
         return false;
@@ -239,6 +240,7 @@ pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint3
         kwargs["eff_size"] = size;
         kwargs["is_load"] = false;
         kwargs["is_store"] = true;
+        kwargs["is_atomic"] = is_atomic;
         kwargs["fault"] = fault;
         
         py::object inst = DynInst(**kwargs);
@@ -633,6 +635,39 @@ pymtl3_tick(void* lsq, uint64_t current_cycle)
         (*wrapper).attr("tick")(current_cycle);
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in tick: " << e.what() << std::endl;
+        if (PyErr_Occurred()) {
+            PyErr_Print();
+        }
+    }
+}
+
+/**
+ * Process store writebacks in PyMTL3 LSQUnitCL.
+ * Called from C++ writebackStores() to ensure PyMTL3 and C++ process stores
+ * in the same cycle, maintaining synchronization.
+ *
+ * This function calls the writeback_stores Callee interface, which triggers
+ * the _writeback_stores_method in PyMTL3 to process pending store writebacks.
+ *
+ * @param lsq Pointer to PyMTL3 wrapper instance.
+ */
+void
+pymtl3_process_store_writebacks(void* lsq)
+{
+    if (!lsq) {
+        return;
+    }
+
+    try {
+        py::object* wrapper = static_cast<py::object*>(lsq);
+
+        // Call writeback_stores Callee interface to handle store writebacks
+        // This ensures PyMTL3 processes stores in sync with C++
+        // The writeback_stores interface corresponds to LSQUnitCL.writeback_stores CalleeIfcCL
+        (*wrapper).attr("writeback_stores")();
+    } catch (const py::error_already_set& e) {
+        std::cerr << "[LSQComparison] Python error in writeback_stores: "
+                  << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }

@@ -40,7 +40,7 @@ namespace o3 {
 void init_pymtl3_module();
 void* create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries);
 bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_strictly_ordered);
-bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault);
+bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_atomic);
 int pymtl3_execute_store(void* lsq, int sq_idx);
 void* pymtl3_commit_load(void* lsq);
 int pymtl3_commit_stores(void* lsq, uint64_t youngest_sn);
@@ -48,6 +48,7 @@ int pymtl3_squash(void* lsq, uint64_t squash_sn);
 int pymtl3_num_loads(void* lsq);
 int pymtl3_num_stores(void* lsq);
 uint64_t pymtl3_get_stat(void* lsq, const std::string &stat_name);
+void pymtl3_process_store_writebacks(void* lsq);
 void pymtl3_set_dcache_callback(void* lsq,
     void (*callback)(uint64_t, uint64_t, uint32_t, bool,
                     const std::vector<uint8_t>&,
