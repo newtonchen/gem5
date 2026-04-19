@@ -1442,6 +1442,15 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
     // Check the SQ for any previous stores that might lead to forwarding
     auto store_it = load_inst->sqIt;
     assert (store_it >= storeWBIt);
+
+    // Debug for sn=3444 - start of forwarding check
+    if (load_inst->seqNum == 3444) {
+        DPRINTF(LSQUnit, "[DEBUG sn=3444] Starting SQ forwarding check. "
+                "sqIt.idx=%d, storeWBIt.idx=%d, effAddrValid=%d\n",
+                store_it._idx, storeWBIt._idx,
+                load_inst->effAddrValid());
+    }
+
     // End once we've reached the top of the LSQ
     while (store_it != storeWBIt && !load_inst->isDataPrefetch()) {
         // Move the index to one younger
@@ -1470,6 +1479,32 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
             bool lower_load_has_store_part = req_s < st_e;
             bool upper_load_has_store_part = req_e > st_s;
 
+            DPRINTF(LSQUnit, "Forwarding check: load sn=%llu, store sn=%llu: "
+                    "req_s=0x%llx, req_e=0x%llx, st_s=0x%llx, st_e=0x%llx, "
+                    "store_size=%d, lower=%d, upper=%d, low_part=%d, up_part=%d\n",
+                    load_inst->seqNum, store_it->instruction()->seqNum,
+                    req_s, req_e, st_s, st_e, store_size,
+                    store_has_lower_limit, store_has_upper_limit,
+                    lower_load_has_store_part, upper_load_has_store_part);
+
+            // Debug for sn=3444 - detailed forwarding check info
+            if (load_inst->seqNum == 3444) {
+                DPRINTF(LSQUnit, "[DEBUG sn=3444] Checking store sn=%llu: "
+                        "st_s=0x%llx, st_e=0x%llx, store_size=%d, isAtomic=%d, "
+                        "isMasked=%d, completed=%d, strictlyOrdered=%d\n",
+                        store_it->instruction()->seqNum, st_s, st_e, store_size,
+                        store_it->instruction()->isAtomic(),
+                        store_it->request()->mainReq() ? store_it->request()->mainReq()->isMasked() : -1,
+                        store_it->completed(),
+                        store_it->instruction()->strictlyOrdered());
+                DPRINTF(LSQUnit, "[DEBUG sn=3444] Conditions: "
+                        "lower=%d, upper=%d, low_part=%d, up_part=%d, "
+                        "isLLSC=%d\n",
+                        store_has_lower_limit, store_has_upper_limit,
+                        lower_load_has_store_part, upper_load_has_store_part,
+                        request->mainReq()->isLLSC());
+            }
+
             auto coverage = AddrRangeCoverage::NoAddrRangeCoverage;
 
             // If the store entry is not atomic (atomic does not have valid
@@ -1484,6 +1519,13 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                 coverage = store_req->isMasked() ?
                     AddrRangeCoverage::PartialAddrRangeCoverage :
                     AddrRangeCoverage::FullAddrRangeCoverage;
+
+                // Debug for sn=3444
+                if (load_inst->seqNum == 3444) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=3444] Full coverage check PASSED. "
+                            "isMasked=%d, coverage=%d (1=No, 2=Partial, 3=Full)\n",
+                            store_req->isMasked(), (int)coverage);
+                }
             } else if (
                 // This is the partial store-load forwarding case where a store
                 // has only part of the load's data and the load isn't LLSC
@@ -1503,6 +1545,19 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                   (store_has_upper_limit || lower_load_has_store_part)))) {
 
                 coverage = AddrRangeCoverage::PartialAddrRangeCoverage;
+
+                // Debug for sn=3444
+                if (load_inst->seqNum == 3444) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=3444] PARTIAL COVERAGE DETECTED! "
+                            "store sn=%llu\n",
+                            store_it->instruction()->seqNum);
+                }
+            } else {
+                // Debug for sn=3444
+                if (load_inst->seqNum == 3444) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=3444] No coverage for store sn=%llu\n",
+                            store_it->instruction()->seqNum);
+                }
             }
 
             if (coverage == AddrRangeCoverage::FullAddrRangeCoverage) {
@@ -1592,6 +1647,15 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                     continue;
                 }
 
+                // Debug for sn=3444
+                if (load_inst->seqNum == 3444) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=3444] Partial coverage detected! "
+                            "store sn=%llu, st_s=0x%llx, st_e=0x%llx, store_size=%d, "
+                            "req_s=0x%llx, req_e=0x%llx, req_size=%u\n",
+                            store_it->instruction()->seqNum, st_s, st_e, store_size,
+                            req_s, req_e, request->mainReq()->getSize());
+                }
+
                 // Must stall load and force it to retry, so long as it's the
                 // oldest load that needs to do so.
                 if (!stalled ||
@@ -1607,6 +1671,10 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                 // rescheduled eventually
                 DPRINTF(LSQUnit, "RESCHEDULE [sn:%lli] at idx=%d due to partial coverage\n",
                         load_inst->seqNum, load_idx);
+                if (load_inst->seqNum == 3444) {
+                    DPRINTF(LSQUnit, "[DEBUG sn=3444] RESCHEDULE triggered by store sn=%llu\n",
+                            store_it->instruction()->seqNum);
+                }
                 iewStage->rescheduleMemInst(load_inst);
                 load_inst->clearIssued();
                 load_inst->effAddrValid(false);
@@ -1624,6 +1692,12 @@ LSQUnit::read(LSQRequest *request, ssize_t load_idx)
                 return NoFault;
             }
         }
+    }
+
+    // Debug for sn=3444 - SQ scan complete
+    if (load_inst->seqNum == 3444) {
+        DPRINTF(LSQUnit, "[DEBUG sn=3444] SQ forwarding check complete. "
+                "No partial coverage triggered. Proceeding to memory access.\n");
     }
 
     // If there's no forwarding case, then go access memory

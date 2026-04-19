@@ -840,6 +840,10 @@ LSQ::pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
         // a strictly ordered load
         inst->getFault() = NoFault;
 
+        // Set effSize early so it's available before translation completes
+        // This is needed for PyMTL3 LSQ comparison to get correct size
+        inst->effSize = size;
+
         request->initiateTranslation();
     }
 
@@ -847,6 +851,7 @@ LSQ::pushRequest(const DynInstPtr& inst, bool isLoad, uint8_t *data,
     if (request->isTranslationComplete()) {
         if (request->isMemAccessRequired()) {
             inst->effAddr = request->getVaddr();
+            // effSize is already set above, but set it again here for consistency
             inst->effSize = size;
             inst->effAddrValid(true);
 

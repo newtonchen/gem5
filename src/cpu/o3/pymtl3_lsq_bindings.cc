@@ -837,13 +837,15 @@ pymtl3_record_reschedule_call(void* lsq, uint64_t seq_num)
  * @param strictly_ordered Whether the load is strictly ordered.
  * @param is_at_commit Whether the load is at commit stage.
  * @param eff_addr Effective address (virtual address after TLB translation).
- * @param eff_size Effective address size.
+ * @param eff_size Effective address size (for inst record).
+ * @param request_size Actual request size from C++ request (for forwarding check).
  * @return Fault code (0 = NoFault).
  */
 int
 pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
                      bool strictly_ordered, bool is_at_commit,
-                     uint64_t eff_addr, bool eff_addr_valid, int eff_size)
+                     uint64_t eff_addr, bool eff_addr_valid, int eff_size,
+                     int request_size)
 {
     if (!lsq) {
         return 0;  // NoFault
@@ -852,7 +854,8 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
     try {
         py::object* wrapper = static_cast<py::object*>(lsq);
         int fault = (*wrapper).attr("execute_load")(seq_num, lq_idx,
-            strictly_ordered, is_at_commit, eff_addr, eff_addr_valid, eff_size).cast<int>();
+            strictly_ordered, is_at_commit, eff_addr, eff_addr_valid, eff_size,
+            request_size).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;

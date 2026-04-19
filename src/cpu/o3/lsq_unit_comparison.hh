@@ -99,7 +99,8 @@ uint64_t pymtl3_get_cycle(void* lsq);
 void pymtl3_tick(void* lsq, uint64_t current_cycle);
 int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
                          bool strictly_ordered, bool is_at_commit,
-                         uint64_t eff_addr, bool eff_addr_valid, int eff_size);
+                         uint64_t eff_addr, bool eff_addr_valid, int eff_size,
+                         int request_size);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
                           uint64_t eff_addr, bool eff_addr_valid, int eff_size,
                           const uint8_t* data, uint32_t data_size, bool is_all_zeros);
