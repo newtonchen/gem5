@@ -41,7 +41,6 @@ void init_pymtl3_module();
 void* create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries);
 bool pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_strictly_ordered);
 bool pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32_t size, int fault, bool is_atomic);
-int pymtl3_execute_store(void* lsq, int sq_idx);
 void* pymtl3_commit_load(void* lsq);
 int pymtl3_commit_stores(void* lsq, uint64_t youngest_sn);
 int pymtl3_squash(void* lsq, uint64_t squash_sn);
@@ -103,20 +102,12 @@ int pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
                          uint64_t eff_addr, bool eff_addr_valid, int eff_size,
                          int request_size);
 int pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
-                          uint64_t eff_addr, bool eff_addr_valid, int eff_size,
-                          const uint8_t* data, uint32_t data_size, bool is_all_zeros);
-void pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size);
-
-void pymtl3_update_load_phys_addr(void* lsq, uint64_t seq_num, uint64_t paddr);
-void pymtl3_update_load_strictly_ordered(void* lsq, uint64_t seq_num, bool is_strictly_ordered);
-void pymtl3_update_load_at_commit(void* lsq, uint64_t seq_num, bool is_at_commit);
-void pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size,
-                               const uint8_t* data, uint32_t data_size, bool is_all_zeros);
-void pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num);
+                          uint64_t eff_addr, bool eff_addr_valid, int size,
+                          const uint8_t* data, bool is_all_zeros,
+                          bool was_translation_delayed, bool was_read_predicate);
 void pymtl3_send_dcache_resp(void* lsq, uint64_t seq_num,
                               const uint8_t* data, uint32_t data_size,
                               bool is_write = false);
-void pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num);
 
 // ===== Writeback 回调函数 =====
 /**

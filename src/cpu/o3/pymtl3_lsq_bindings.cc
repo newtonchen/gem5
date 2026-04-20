@@ -909,16 +909,18 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
  * @param sq_idx Store queue index.
  * @param eff_addr Effective address (or vaddr if eff_addr_valid is false).
  * @param eff_addr_valid Whether eff_addr is a valid physical address.
- * @param eff_size Access size in bytes.
+ * @param size Actual size after initiateAcc (may be 0 if fault).
  * @param data Store data buffer.
- * @param data_size Size of data buffer.
  * @param is_all_zeros Whether data is all zeros.
+ * @param was_translation_delayed TranslationDelayed BEFORE initiateAcc (if true, C++ skips size check).
+ * @param was_read_predicate ReadPredicate BEFORE initiateAcc (if false, C++ skips size check).
  * @return Fault code (0 = NoFault).
  */
 int
 pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
-                     uint64_t eff_addr, bool eff_addr_valid, int eff_size,
-                     const uint8_t* data, uint32_t data_size, bool is_all_zeros)
+                     uint64_t eff_addr, bool eff_addr_valid, int size,
+                     const uint8_t* data, bool is_all_zeros,
+                     bool was_translation_delayed, bool was_read_predicate)
 {
     if (!lsq) {
         return 0;  // NoFault
@@ -929,14 +931,15 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
         
         // Convert data to Python bytes
         py::bytes py_data;
-        if (data && data_size > 0) {
-            py_data = py::bytes(reinterpret_cast<const char*>(data), data_size);
+        if (data && size > 0) {
+            py_data = py::bytes(reinterpret_cast<const char*>(data), size);
         }
         
         int fault = (*wrapper).attr("execute_store")(
             seq_num, sq_idx,
-            eff_addr, eff_addr_valid, eff_size,
-            py_data, data_size, is_all_zeros).cast<int>();
+            eff_addr, eff_addr_valid, size,
+            py_data, is_all_zeros,
+            was_translation_delayed, was_read_predicate).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
         std::cerr << "[LSQComparison] Python error in execute_store: " << e.what() << std::endl;
@@ -944,182 +947,6 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
             PyErr_Print();
         }
         return 0;  // Return NoFault on error
-    }
-}
-
-/**
- * Update load address in PyMTL3 LSQUnitCL.
- * This should be called before execute_load to set the effective address.
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param seq_num Instruction sequence number.
- * @param addr Effective address.
- * @param size Access size in bytes.
- */
-void
-pymtl3_update_load_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("update_load_addr")(seq_num, addr, size);
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in update_load_addr: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-void
-pymtl3_update_load_phys_addr(void* lsq, uint64_t seq_num, uint64_t paddr)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("update_load_phys_addr")(seq_num, paddr);
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in update_load_phys_addr: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-void
-pymtl3_update_load_strictly_ordered(void* lsq, uint64_t seq_num, bool is_strictly_ordered)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("update_load_strictly_ordered")(seq_num, is_strictly_ordered);
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in update_load_strictly_ordered: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-void
-pymtl3_update_load_at_commit(void* lsq, uint64_t seq_num, bool is_at_commit)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("update_load_at_commit")(seq_num, is_at_commit);
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in update_load_at_commit: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-/**
- * Update store address and data in PyMTL3 LSQUnitCL.
- * This should be called after the store address is calculated.
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param seq_num Instruction sequence number.
- * @param addr Effective address.
- * @param size Access size in bytes.
- * @param data Store data pointer.
- * @param data_size Store data size in bytes.
- * @param is_all_zeros Whether the store writes all zeros.
- */
-void
-pymtl3_update_store_addr(void* lsq, uint64_t seq_num, uint64_t addr, uint32_t size,
-                         const uint8_t* data, uint32_t data_size, bool is_all_zeros)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        
-        // Convert data to Python bytes
-        py::bytes data_bytes;
-        if (data && data_size > 0) {
-            data_bytes = py::bytes(reinterpret_cast<const char*>(data), data_size);
-            std::cerr << "[LSQComparison-DEBUG] pymtl3_update_store_addr: data_size=" << data_size
-                      << ", first_byte=0x" << std::hex << (int)data[0] << std::dec << std::endl;
-        } else {
-            std::cerr << "[LSQComparison-DEBUG] pymtl3_update_store_addr: no data, data=" << (void*)data
-                      << ", data_size=" << data_size << std::endl;
-        }
-        
-        (*wrapper).attr("execute_store_with_addr")(seq_num, addr, size, data_bytes, is_all_zeros);
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in execute_store_with_addr: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-/**
- * Update load instruction fault status in PyMTL3 LSQUnitCL.
- * This is called before execute_load to sync fault state from Gem5.
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param lq_idx Load queue index.
- * @param fault Fault status (0 = NoFault, 1 = Fault).
- * @param seq_num Instruction sequence number (for matching).
- */
-void
-pymtl3_update_load_inst_fault(void* lsq, int lq_idx, int fault, uint64_t seq_num)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        (*wrapper).attr("update_load_inst_fault")(lq_idx, fault, seq_num);
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in update_load_inst_fault: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-/**
- * Update store instruction fault status in PyMTL3 LSQUnitCL.
- * This is called before execute_store to sync fault state from Gem5.
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param sq_idx Store queue index.
- * @param fault Fault status (0 = NoFault, 1 = Fault).
- * @param seq_num Instruction sequence number (for matching).
- */
-void
-pymtl3_update_store_inst_fault(void* lsq, int sq_idx, int fault, uint64_t seq_num)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        // For now, stores don't need special fault handling as they use different mechanism
-        // This is a placeholder for future implementation
-        (void)wrapper; (void)sq_idx; (void)fault; (void)seq_num;  // Suppress unused warnings
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in update_store_inst_fault: " << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
     }
 }
 

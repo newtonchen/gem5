@@ -512,9 +512,13 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 Fault
 LSQUnitComparison::executeStore(const DynInstPtr &inst)
 {
-    uint32_t savedEffSize = inst->effSize;
     InstSeqNum seq_num = inst->seqNum;
     int sq_idx = inst->sqIdx;
+    
+    // 记录initiateAcc前的translationDelayed状态
+    // 这个状态决定了C++是否会检查size==0
+    bool was_translation_delayed_before = inst->isTranslationDelayed();
+    bool read_predicate_before = inst->readPredicate();
     
     // 调用基类实现（Gem5）
     Fault result = LSQUnit::executeStore(inst);
@@ -550,35 +554,34 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
                 if (raw_data != nullptr) {
                     store_data = raw_data;
                     is_all_zeros = sq_entry.isAllZeros();
-                    actual_data_size = sq_entry.size();
-                } else {
-                    DPRINTF(PyMTL3, "executeStore sn=%llu: store_data is null, using zero data\n", seq_num);
-                    actual_data_size = sq_entry.size();
-                    if (actual_data_size == 0) {
-                        actual_data_size = savedEffSize;
-                    }
                 }
+                // Always get the actual size from store queue (may be 0 if fault occurred)
+                // This is the true size after initiateAcc, used for fault detection
+                actual_data_size = sq_entry.size();
+                DPRINTF(PyMTL3, "executeStore sn=%llu: store_data=%p, sq_entry.size()=%u\n", 
+                        seq_num, raw_data, actual_data_size);
             }
         }
         
-        // Use actual data size from store queue, not savedEffSize
-        // savedEffSize may be 0 if address calculation failed (before executeStore)
-        // After executeStore, actual_data_size should have the correct size
-        // If actual_data_size is 0, use inst->effSize which is set by pushRequest
-        uint32_t eff_size_to_pass = actual_data_size;
-        if (eff_size_to_pass == 0) {
-            eff_size_to_pass = inst->effSize > 0 ? inst->effSize : savedEffSize;
-        }
+        // Pass size info, translation state, and predicate state to PyMTL3
+        // PyMTL3 uses these to detect size==0 faults (same as C++ logic)
+        // - actual_size: size after initiateAcc (may be 0 if fault occurred)
+        // - was_translation_delayed_before: translationDelayed BEFORE initiateAcc (if true, C++ skips size check)
+        // - read_predicate_before: readPredicate BEFORE initiateAcc (if false, C++ skips size check)
         
-        DPRINTF(PyMTL3, "executeStore sn=%llu: store_data=%p, actual_size=%u, saved_size=%u, passing_size=%u\n",
-                seq_num, store_data, actual_data_size, savedEffSize, eff_size_to_pass);
+        DPRINTF(PyMTL3, "executeStore sn=%llu: store_data=%p, actual_size=%u, result=%s, wasTranslationDelayed=%d, wasReadPredicate=%d, nowTranslationDelayed=%d\n",
+                seq_num, store_data, actual_data_size,
+                (result == NoFault ? "NoFault" : "Fault"), was_translation_delayed_before, read_predicate_before,
+                inst->isTranslationDelayed());
         
         // Call PyMTL3 execute_store with all necessary information
         // including vaddr (or effAddr), data, and flags
         // When effAddrValid is false, vaddr contains the virtual address for PyMTL3 TLB
+        // Pass all info for PyMTL3 to detect size==0 fault
         int py_fault = pymtl3_execute_store(pymtl3LSQ, seq_num, sq_idx,
-                                            vaddr, vaddrValid, eff_size_to_pass,
-                                            store_data, eff_size_to_pass, is_all_zeros);
+                                            vaddr, vaddrValid, actual_data_size,
+                                            store_data, is_all_zeros,
+                                            was_translation_delayed_before, read_predicate_before);
         
         // 对比结果
         if ((result == NoFault && py_fault != 0) || 
@@ -612,12 +615,24 @@ LSQUnitComparison::commitLoad()
 void
 LSQUnitComparison::commitLoads(InstSeqNum &youngest_inst)
 {
+    // 记录提交前的状态
+    size_t loads_before = loadQueue.size();
+
     // 调用基类实现（Gem5）
     LSQUnit::commitLoads(youngest_inst);
 
-    // 如果 PyMTL3 可用，调用 PyMTL3 实现
+    // 计算提交了多少个 loads
+    size_t loads_committed = loads_before - loadQueue.size();
+
+    DPRINTF(PyMTL3, "commitLoads: youngest_inst=%llu, loads_before=%lu, loads_after=%lu, committed=%lu\n",
+            youngest_inst, (unsigned long)loads_before, (unsigned long)loadQueue.size(), (unsigned long)loads_committed);
+
+    // 如果 PyMTL3 可用，调用 PyMTL3 实现相同次数
     if (pymtl3Available && pymtl3LSQ) {
-        pymtl3_commit_load(pymtl3LSQ);
+        DPRINTF(PyMTL3, "commitLoads: calling pymtl3_commit_load %lu times\n", (unsigned long)loads_committed);
+        for (size_t i = 0; i < loads_committed; ++i) {
+            pymtl3_commit_load(pymtl3LSQ);
+        }
         // 注意：队列状态比较在 LSQ::tick() 中统一进行
     }
 }
