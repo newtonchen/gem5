@@ -25,21 +25,6 @@ MockTLBPort::~MockTLBPort()
 }
 
 void
-MockTLBPort::recordCPTLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
-                           bool isLoad, uint64_t seqNum)
-{
-    TLBCallRecord record;
-    record.cycle = cycle;
-    record.vaddr = vaddr;
-    record.size = size;
-    record.isLoad = isLoad;
-    record.seqNum = seqNum;
-    record.methodName = "translateReq";
-
-    cppTLBReqs.push(record);
-}
-
-void
 MockTLBPort::recordCPTLBResp(uint64_t cycle, uint64_t seqNum,
                              Addr paddr, int fault)
 {
@@ -51,6 +36,21 @@ MockTLBPort::recordCPTLBResp(uint64_t cycle, uint64_t seqNum,
     record.methodName = "translateResp";
 
     cppTLBResps.push(record);
+}
+
+void
+MockTLBPort::recordCPInternalTLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
+                                    bool isLoad, uint64_t seqNum)
+{
+    TLBCallRecord record;
+    record.cycle = cycle;
+    record.vaddr = vaddr;
+    record.size = size;
+    record.isLoad = isLoad;
+    record.seqNum = seqNum;
+    record.methodName = "translateReq";
+
+    cppInternalTLBReqs.push(record);
 }
 
 void
@@ -83,17 +83,6 @@ MockTLBPort::recordPyMTL3TLBResp(uint64_t cycle, uint64_t seqNum,
 }
 
 bool
-MockTLBPort::getNextCPTLBReq(TLBCallRecord& record)
-{
-    if (cppTLBReqs.empty()) {
-        return false;
-    }
-    record = cppTLBReqs.front();
-    cppTLBReqs.pop();
-    return true;
-}
-
-bool
 MockTLBPort::getNextCPTLBResp(TLBCallRecord& record)
 {
     if (cppTLBResps.empty()) {
@@ -101,6 +90,17 @@ MockTLBPort::getNextCPTLBResp(TLBCallRecord& record)
     }
     record = cppTLBResps.front();
     cppTLBResps.pop();
+    return true;
+}
+
+bool
+MockTLBPort::getNextCPInternalTLBReq(TLBCallRecord& record)
+{
+    if (cppInternalTLBReqs.empty()) {
+        return false;
+    }
+    record = cppInternalTLBReqs.front();
+    cppInternalTLBReqs.pop();
     return true;
 }
 
@@ -127,15 +127,15 @@ MockTLBPort::getNextPyMTL3TLBResp(TLBCallRecord& record)
 }
 
 bool
-MockTLBPort::hasPendingCPTLBReqs() const
-{
-    return !cppTLBReqs.empty();
-}
-
-bool
 MockTLBPort::hasPendingCPTLBResps() const
 {
     return !cppTLBResps.empty();
+}
+
+bool
+MockTLBPort::hasPendingCPInternalTLBReqs() const
+{
+    return !cppInternalTLBReqs.empty();
 }
 
 bool
@@ -150,11 +150,24 @@ MockTLBPort::hasPendingPyMTL3TLBResps() const
     return !pymtl3TLBResps.empty();
 }
 
+bool
+MockTLBPort::hasPyMTL3TLBReqWithSeqNum(uint64_t seqNum) const
+{
+    std::queue<TLBCallRecord> tempQueue = pymtl3TLBReqs;
+    while (!tempQueue.empty()) {
+        if (tempQueue.front().seqNum == seqNum) {
+            return true;
+        }
+        tempQueue.pop();
+    }
+    return false;
+}
+
 void
 MockTLBPort::clear()
 {
-    while (!cppTLBReqs.empty()) cppTLBReqs.pop();
     while (!cppTLBResps.empty()) cppTLBResps.pop();
+    while (!cppInternalTLBReqs.empty()) cppInternalTLBReqs.pop();
     while (!pymtl3TLBReqs.empty()) pymtl3TLBReqs.pop();
     while (!pymtl3TLBResps.empty()) pymtl3TLBResps.pop();
 }
@@ -192,18 +205,9 @@ MockTLBPort::compareCalls(const TLBCallRecord& cppCall,
                      ", PyMTL3=" + std::to_string(pymtl3Call.isLoad);
             return false;
         }
-    } else if (cppCall.methodName == "translateResp") {
-        if (cppCall.paddr != pymtl3Call.paddr) {
-            reason = "paddr mismatch: C++=0x" + std::to_string(cppCall.paddr) +
-                     ", PyMTL3=0x" + std::to_string(pymtl3Call.paddr);
-            return false;
-        }
-        if (cppCall.fault != pymtl3Call.fault) {
-            reason = "fault mismatch: C++=" + std::to_string(cppCall.fault) +
-                     ", PyMTL3=" + std::to_string(pymtl3Call.fault);
-            return false;
-        }
     }
+    // Note: translateResp comparison is skipped because PyMTL3's TLB resp
+    // is driven by C++, so they should always match.
 
     return true;
 }

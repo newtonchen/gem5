@@ -18,9 +18,6 @@
 #include "mem/request.hh"
 #include <iostream>
 
-// 全局变量，用于回调函数访问当前实例
-static gem5::o3::LSQUnitComparison* g_currentLSQUnitComparison = nullptr;
-
 // 全局变量，用于TLB回调访问当前实例
 static gem5::o3::LSQUnitComparison* g_currentLSQUnitForTLB = nullptr;
 
@@ -29,6 +26,10 @@ namespace gem5
 
 namespace o3
 {
+
+// 全局变量，用于回调函数访问当前实例
+// 注意：这个变量在 lsq_unit_comparison.cc 中定义，在 pymtl3_lsq_bindings.cc 中使用 extern 声明
+LSQUnitComparison* g_currentLSQUnitComparison = nullptr;
 
 #if LSQ_COMPARISON_MODE
 
@@ -48,7 +49,7 @@ LSQUnitComparison::LSQUnitComparison(uint32_t lqEntries, uint32_t sqEntries)
 {
     // 注意：不在构造函数中初始化 Python，因为此时 Python 可能还未准备好
     // Mock DCache 端口的创建也移到 init() 中
-    std::cerr << "[LSQComparison] LSQUnitComparison constructor called" << std::endl;
+    std::cout << "[LSQComparison] LSQUnitComparison constructor called" << std::endl;
 }
 
 LSQUnitComparison::~LSQUnitComparison()
@@ -89,9 +90,14 @@ static void pymtl3DCacheCallback(uint64_t cycle, uint64_t addr, uint32_t size,
 static void pymtl3TLBReqCallback(uint64_t seq_num, uint64_t vaddr, 
                                   uint32_t size, bool is_load)
 {
+    std::cout << "[LSQComparison-DEBUG] pymtl3TLBReqCallback called: sn=" << seq_num 
+              << ", vaddr=0x" << std::hex << vaddr << std::dec 
+              << ", size=" << size << ", is_load=" << is_load << std::endl;
     if (g_currentLSQUnitForTLB) {
         // 调用 LSQUnitComparison::handleTLBReq 发起异步 TLB 转换
         g_currentLSQUnitForTLB->handleTLBReq(seq_num, vaddr, size, is_load);
+    } else {
+        std::cout << "[LSQComparison-DEBUG] g_currentLSQUnitForTLB is null!" << std::endl;
     }
 }
 
@@ -436,7 +442,7 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
             stallingLoadSeqNum = seq_num;
         }
 
-        if (!inst->isExecuted()) {
+        //if (!inst->isExecuted()) {
             // Get vaddr for PyMTL3 - use inst->effAddr if valid (this is the authoritative address)
             // Only calculate if effAddr is not yet available
             Addr vaddr;
@@ -482,6 +488,18 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
                 DPRINTF(PyMTL3, "executeLoad sn=%llu: using request_size=%d (from request)\n",
                         seq_num, request_size);
             }
+       
+            // 如果 C++ TLB 翻译已完成，驱动 TLB 响应到 PyMTL3
+            if (inst->translationCompleted()) {
+                Addr paddr = inst->physEffAddr;
+                int fault_code = (inst->fault == NoFault) ? 0 : 1;
+                DPRINTF(PyMTL3, "executeLoad sn=%llu: C++ TLB completed, driving response to PyMTL3 paddr=0x%llx fault=%d\n",
+                        seq_num, paddr, fault_code);
+                if (mockTLB && pymtl3Available) {
+                    mockTLB->recordCPTLBResp(callCycle, seq_num, paddr, fault_code);
+                    sendTLBResp(seq_num, paddr, fault_code);
+                }
+            }
 
             // Pass all necessary information directly to execute_load
             // including strictlyOrdered, isAtCommit, vaddr, and effSize
@@ -494,12 +512,13 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
 
             if ((result == NoFault && py_fault != 0) ||
                 (result != NoFault && py_fault == 0)) {
-                std::cerr << "[LSQComparison] Mismatch in executeLoad fault: "
+                std::cout << "[LSQComparison] Mismatch in executeLoad fault: "
                           << "Gem5=" << (result == NoFault ? "NoFault" : "Fault")
                           << ", PyMTL3=" << (py_fault == 0 ? "NoFault" : "Fault") << " [sn=" << seq_num << ", lq_idx=" << lq_idx << "]"
                           << std::endl;
             }
-        }
+
+        //}
         
         compareIQCalls();
 
@@ -519,27 +538,10 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
     // 这个状态决定了C++是否会检查size==0
     bool was_translation_delayed_before = inst->isTranslationDelayed();
     bool read_predicate_before = inst->readPredicate();
-    
-    // 调用基类实现（Gem5）
-    Fault result = LSQUnit::executeStore(inst);
-
-    // 如果 PyMTL3 可用，更新 store 地址并调用 PyMTL3 实现
-    if (pymtl3Available && pymtl3LSQ) {
         // Get vaddr for PyMTL3 - use inst->effAddr if valid (this is the authoritative address)
         // Only calculate if effAddr is not yet available
         Addr vaddr;
         bool vaddrValid;
-        if (inst->effAddrValid()) {
-            vaddr = inst->effAddr;
-            vaddrValid = true;
-            DPRINTF(PyMTL3, "executeStore sn=%llu: using inst->effAddr=0x%llx (valid=%d)\n",
-                    seq_num, vaddr, inst->effAddrValid());
-        } else {
-            vaddr = calculateStoreVaddr(inst);
-            vaddrValid = true;
-            DPRINTF(PyMTL3, "executeStore sn=%llu: using calculated vaddr=0x%llx (effAddr not valid)\n",
-                    seq_num, vaddr);
-        }
         
         // Get Store data and size from store queue AFTER executeStore
         // because executeStore (via initiateAcc) sets up the store queue entry
@@ -562,7 +564,61 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
                         seq_num, raw_data, actual_data_size);
             }
         }
+
+        if (inst->effAddrValid()) {
+            vaddr = inst->effAddr;
+            vaddrValid = true;
+            actual_data_size = inst->effSize > 0 ? inst->effSize : 8;
+            DPRINTF(PyMTL3, "executeStore sn=%llu: using inst->effAddr=0x%llx (valid=%d)\n",
+                    seq_num, vaddr, inst->effAddrValid());
+        } else {
+            vaddr = calculateStoreVaddr(inst);
+            vaddrValid = false;
+            DPRINTF(PyMTL3, "executeStore sn=%llu: using calculated vaddr=0x%llx (effAddr not valid)\n",
+                    seq_num, vaddr);
+        }
+
+    // 调用基类实现（Gem5）
+    Fault result = LSQUnit::executeStore(inst);
+
+    // 拦截并记录 C++ executeStore 内部的 TLB 请求
+    // 如果发起了 TLB 请求（translationStarted 且 savedRequest 被设置）
+    if (inst->translationStarted() && inst->savedRequest && mockTLB) {
+        Addr cpp_tlb_vaddr = inst->savedRequest->mainReq()->getVaddr();
+        uint32_t cpp_tlb_size = inst->savedRequest->mainReq()->getSize();
         
+        // 记录 C++ TLB 请求（用于和 PyMTL3 对比）
+        // 使用专门的记录函数，标记为 C++ 内部发起的请求
+        mockTLB->recordCPInternalTLBReq(curTick(), cpp_tlb_vaddr, cpp_tlb_size, 
+                                        false, seq_num);  // false = store
+        
+        DPRINTF(PyMTL3, "executeStore sn=%llu: recorded C++ internal TLB req "
+                "vaddr=0x%llx, size=%u\n", seq_num, cpp_tlb_vaddr, cpp_tlb_size);
+    }
+
+            
+        // 如果 C++ TLB 翻译已完成，驱动 TLB 响应到 PyMTL3
+        if (inst->translationCompleted()) {
+            Addr paddr = inst->physEffAddr;
+            int fault_code = (inst->fault == NoFault) ? 0 : 1;
+            DPRINTF(PyMTL3, "executeStore sn=%llu: C++ TLB completed, driving response to PyMTL3 paddr=0x%llx fault=%d\n",
+                    seq_num, paddr, fault_code);
+            if (mockTLB && pymtl3Available) {
+                mockTLB->recordCPTLBResp(curTick(), seq_num, paddr, fault_code);
+                sendTLBResp(seq_num, paddr, fault_code);
+            }
+        }
+
+            // Get request size from C++ request if available
+            if (inst->hasRequest() && inst->savedRequest) {
+                actual_data_size = inst->savedRequest->mainReq()->getSize();
+                vaddr = inst->savedRequest->mainReq()->getVaddr();
+                DPRINTF(PyMTL3, "executeStore sn=%llu: using request_size=%d  vaddr=0x%llx (from request)\n",
+                        seq_num, actual_data_size, vaddr);
+            }
+
+    // 如果 PyMTL3 可用，更新 store 地址并调用 PyMTL3 实现
+    if (pymtl3Available && pymtl3LSQ) {
         // Pass size info, translation state, and predicate state to PyMTL3
         // PyMTL3 uses these to detect size==0 faults (same as C++ logic)
         // - actual_size: size after initiateAcc (may be 0 if fault occurred)
@@ -586,10 +642,13 @@ LSQUnitComparison::executeStore(const DynInstPtr &inst)
         // 对比结果
         if ((result == NoFault && py_fault != 0) || 
             (result != NoFault && py_fault == 0)) {
-            std::cerr << "[LSQComparison] Mismatch in executeStore fault: "
-                      << "Gem5=" << (result == NoFault ? "NoFault" : "Fault")
+            std::cout << "[LSQComparison] Mismatch in executeStore fault: sn=" << seq_num
+                      << ", Gem5=" << (result == NoFault ? "NoFault" : "Fault")
                       << ", PyMTL3=" << (py_fault == 0 ? "NoFault" : "Fault") << std::endl;
         }
+
+        // 对比 C++ 内部 TLB 请求和 PyMTL3 TLB 请求
+        compareCPInternalAndPyMTL3TLBReq(seq_num); 
         
         // 注意：队列状态比较在 LSQ::tick() 中统一进行
         // 以确保 PyMTL3 的 @update_ff 已经执行
@@ -857,7 +916,7 @@ LSQUnitComparison::logMismatch(const std::string &methodName,
                               const std::string &message)
 {
     mismatchCount++;
-    std::cerr << "[LSQComparison] Mismatch in " << methodName
+    std::cout << "[LSQComparison] Mismatch in " << methodName
               << ": " << message << std::endl;
 }
 
@@ -919,6 +978,9 @@ LSQUnitComparison::compareStatistics()
             // 例如：对比 Gem5 和 PyMTL3 的计数器差异
         }
     }
+
+    // 对比 DCache 请求
+    compareDCacheCalls();
 }
 
 void
@@ -970,6 +1032,50 @@ LSQUnitComparison::compareIQCalls()
                 csprintf("PyMTL3 has reschedule but C++ does not [sn=%d]",
                          pyRecord.seqNum));
         }
+    }
+}
+
+void
+LSQUnitComparison::compareDCacheCalls()
+{
+    if (!mockDCache) {
+        return;
+    }
+
+    // Step 1: 遍历 PyMTL3 的请求，在 C++ 请求中查找相同 seqNum 的请求并比较
+    DCacheCallRecord pyRecord;
+    while (mockDCache->getNextPyMTL3Call(pyRecord)) {
+        DCacheCallRecord cpRecord;
+        
+        // 在 C++ 请求中查找相同 seqNum 的请求
+        if (mockDCache->findAndRemoveCPCallBySeqNum(pyRecord.seqNum, cpRecord)) {
+            // 找到了匹配的 C++ 请求，进行比较
+            std::string reason;
+            if (MockDCachePort::compareCalls(cpRecord, pyRecord, reason)) {
+                // 比较通过
+                DPRINTF(PyMTL3, "[DCacheCompare] sn=%lu: Match OK\n", pyRecord.seqNum);
+            } else {
+                // 比较失败，记录不匹配
+                logMismatch("DCache.req", reason);
+                std::cout << "[LSQComparison] Mismatch in DCache req: sn="
+                          << pyRecord.seqNum << ", " << reason << std::endl;
+            }
+        } else {
+            // 没有找到匹配的 C++ 请求
+            logMismatch("DCache.req",
+                csprintf("PyMTL3 has DCache req but C++ does not [sn=%lu, addr=0x%lx, isWrite=%d]",
+                         pyRecord.seqNum, pyRecord.addr, pyRecord.isWrite));
+            std::cout << "[LSQComparison] PyMTL3 DCache req not matched: sn="
+                      << pyRecord.seqNum << ", addr=0x" << std::hex << pyRecord.addr
+                      << std::dec << ", isWrite=" << pyRecord.isWrite << std::endl;
+        }
+    }
+
+    // Step 2: 清理超时的请求（超过 200 个 cycle 未匹配）
+    const uint64_t timeoutCycles = 200;
+    int expiredCount = mockDCache->removeExpiredCalls(curTick(), timeoutCycles);
+    if (expiredCount > 0) {
+        std::cout << "[LSQComparison] Removed " << expiredCount << " expired DCache requests (timeout=" << timeoutCycles << " cycles)" << std::endl;
     }
 }
 
@@ -1101,11 +1207,29 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
                                  uint32_t size, bool is_load)
 {
     uint64_t callCycle = curTick();
-
-    // 记录 C++ TLB 请求
+    
+    // 记录 PyMTL3 的 TLB 请求到 mockTLB，以便后续对比
     if (mockTLB) {
-        mockTLB->recordCPTLBReq(callCycle, vaddr, size, is_load, seq_num);
+        mockTLB->recordPyMTL3TLBReq(callCycle, vaddr, size, is_load, seq_num);
     }
+    // 首先检查是否有缓存的TLB响应（C++转换已完成但PyMTL3请求未到）
+    std::cout << "[LSQComparison-DEBUG] handleTLBReq sn=" << seq_num << ": checking " << cachedTLBResps.size() << " cached responses" << std::endl;
+    for (auto it = cachedTLBResps.begin(); it != cachedTLBResps.end(); ++it) {
+        if (it->seqNum == seq_num) {
+            std::cout << "[LSQComparison-DEBUG] handleTLBReq sn=" << seq_num << ": Found cached TLB response, sending immediately" << std::endl;
+            DPRINTF(PyMTL3, "handleTLBReq sn=%llu: Found cached TLB response, sending immediately\n", seq_num);
+            // 发送缓存的响应给PyMTL3
+            sendTLBResp(it->seqNum, it->paddr, it->fault);
+            // 从缓存中移除
+            cachedTLBResps.erase(it);
+            // 记录到mockTLB用于对比
+            if (mockTLB) {
+                mockTLB->recordPyMTL3TLBResp(callCycle, seq_num, it->paddr, it->fault);
+            }
+            return;
+        }
+    }
+    std::cout << "[LSQComparison-DEBUG] handleTLBReq sn=" << seq_num << ": no cached response found, continuing" << std::endl;
 
     // 获取 ThreadContext 和 MMU
     if (!cpuPtr) {
@@ -1136,83 +1260,62 @@ LSQUnitComparison::handleTLBReq(uint64_t seq_num, Addr vaddr,
         return;
     }
     
-    // 创建 finish callback
-    auto finishCallback = [this](uint64_t sn, Addr paddr, Fault fault, bool delayed) {
-        this->completeTLBTranslation(sn, paddr, fault, delayed);
-    };
-    
-    // 创建 PyTLBRequest 对象
-    auto tlbReq = std::make_unique<PyTLBRequest>(
-        vaddr, size, is_load, seq_num, tc, mmu, finishCallback);
-    
-    // 保存到 outstanding 列表
-    outstandingTLBReqs.push_back(std::move(tlbReq));
-    
-    // 获取指针并启动转换
-    PyTLBRequest* reqPtr = outstandingTLBReqs.back().get();
-    reqPtr->initiateTranslation();
-    
-    // 注意：initiateTranslation 可能同步调用 finish()，也可能异步调用
-    // 同步调用时，outstandingTLBReqs 中的 entry 可能已经被移除
-}
-
-void
-LSQUnitComparison::completeTLBTranslation(uint64_t seq_num, Addr paddr,
-                                           Fault fault, bool delayed)
-{
-    uint64_t callCycle = curTick();
-
-    // 记录 C++ TLB resp
-    int fault_code = (fault == NoFault) ? 0 : 1;
-    if (mockTLB) {
-        mockTLB->recordCPTLBResp(callCycle, seq_num, paddr, fault_code);
-    }
-
-    // 从 outstanding 列表中移除（如果还在的话）
-    for (auto it = outstandingTLBReqs.begin(); it != outstandingTLBReqs.end(); ++it) {
-        if ((*it)->getSeqNum() == seq_num) {
-            outstandingTLBReqs.erase(it);
-            break;
-        }
-    }
-
-    // 尝试对比并驱动 PyMTL3
-    if (mockTLB && pymtl3Available) {
-        compareAndDriveTLBResp(seq_num, paddr, fault_code);
-    }
-}
-
-void
-LSQUnitComparison::compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int fault)
-{
-    // 检查是否有等待的 PyMTL3 TLB resp
-    TLBCallRecord pymtl3Resp;
-    if (!mockTLB->getNextPyMTL3TLBResp(pymtl3Resp)) {
-        return;
-    }
-
-
-    // 对比 PyMTL3 resp 和 C++ resp
-    std::string reason;
-    TLBCallRecord cppResp;
-    cppResp.seqNum = seq_num;
-    cppResp.paddr = paddr;
-    cppResp.fault = fault;
-    cppResp.methodName = "translateResp";
-
-    if (!MockTLBPort::compareCalls(cppResp, pymtl3Resp, reason)) {
-        logMismatch("TLB.resp", reason);
-    }
-
-    // 驱动 PyMTL3
-    sendTLBResp(seq_num, paddr, fault);
+    // 注意：不再创建 PyTLBRequest 和启动TLB转换
+    // C++ 基类 executeStore/executeLoad 已经触发了真实的 TLB 访问
+    // 我们只需要等待 C++ 的 TLB 响应到达后通过 sendTLBResp 驱动给 PyMTL3
+    DPRINTF(PyMTL3, "handleTLBReq sn=%llu: C++ TLB not completed yet, waiting for response\n", seq_num);
 }
 
 void
 LSQUnitComparison::sendTLBResp(uint64_t seq_num, Addr paddr, int fault)
 {
+    // Check if PyMTL3 has sent a TLB request with this seqNum
+    if (!mockTLB || !mockTLB->hasPyMTL3TLBReqWithSeqNum(seq_num)) {
+        // PyMTL3 request not received yet, cache the response
+        DPRINTF(PyMTL3, "sendTLBResp sn=%llu: PyMTL3 req not ready, caching response\n", seq_num);
+        cachedTLBResps.emplace_back(seq_num, paddr, fault, curTick());
+        return;
+    }
+
+    // PyMTL3 request received, send the response
     if (tlbRespCallback) {
         tlbRespCallback(seq_num, paddr, fault);
+    }
+}
+
+void
+LSQUnitComparison::compareCPInternalAndPyMTL3TLBReq(uint64_t seq_num)
+{
+    if (!mockTLB || !pymtl3Available) {
+        return;
+    }
+
+    // 获取 C++ 内部 TLB 请求
+    TLBCallRecord cppReq;
+    if (!mockTLB->getNextCPInternalTLBReq(cppReq)) {
+        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: No C++ internal TLB req\n",
+                seq_num);
+        return;  // 没有 C++ 内部 TLB 请求
+    }
+
+    // 获取 PyMTL3 TLB 请求
+    TLBCallRecord pymtl3Req;
+    if (!mockTLB->getNextPyMTL3TLBReq(pymtl3Req)) {
+        // PyMTL3 没有对应的请求，可能是 C++ 独有的
+        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: C++ internal TLB req but no PyMTL3 req\n",
+                seq_num);
+        return;
+    }
+
+    // 对比请求
+    std::string reason;
+    if (!MockTLBPort::compareCalls(cppReq, pymtl3Req, reason)) {
+        std::cout << "[LSQComparison] Mismatch in TLB req (C++ internal vs PyMTL3): sn=" 
+                  << seq_num << ", " << reason << std::endl;
+        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: MISMATCH - %s\n", seq_num, reason);
+    } else {
+        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: TLB req match (C++ internal vs PyMTL3)\n",
+                seq_num);
     }
 }
 

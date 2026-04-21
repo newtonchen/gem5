@@ -54,15 +54,16 @@ class MockTLBPort
     ~MockTLBPort();
 
     /**
-     * Record a TLB request from C++ LSQUnit
+     * Record a TLB request from C++ LSQUnit internal (via executeStore/executeLoad)
+     * This is used to capture TLB requests initiated internally by C++ LSQUnit
      * @param cycle Current cycle
      * @param vaddr Virtual address
      * @param size Access size
      * @param isLoad True for load, false for store
      * @param seqNum Instruction sequence number
      */
-    void recordCPTLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
-                        bool isLoad, uint64_t seqNum);
+    void recordCPInternalTLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
+                                bool isLoad, uint64_t seqNum);
 
     /**
      * Record a TLB response from C++ LSQUnit
@@ -96,14 +97,14 @@ class MockTLBPort
                              Addr paddr, int fault);
 
     /**
-     * Get the next recorded C++ TLB request
-     */
-    bool getNextCPTLBReq(TLBCallRecord& record);
-
-    /**
      * Get the next recorded C++ TLB response
      */
     bool getNextCPTLBResp(TLBCallRecord& record);
+
+    /**
+     * Get the next recorded C++ internal TLB request (from executeStore/executeLoad)
+     */
+    bool getNextCPInternalTLBReq(TLBCallRecord& record);
 
     /**
      * Get the next recorded PyMTL3 TLB request
@@ -116,14 +117,14 @@ class MockTLBPort
     bool getNextPyMTL3TLBResp(TLBCallRecord& record);
 
     /**
-     * Check if there are pending C++ TLB requests
-     */
-    bool hasPendingCPTLBReqs() const;
-
-    /**
      * Check if there are pending C++ TLB responses
      */
     bool hasPendingCPTLBResps() const;
+
+    /**
+     * Check if there are pending C++ internal TLB requests
+     */
+    bool hasPendingCPInternalTLBReqs() const;
 
     /**
      * Check if there are pending PyMTL3 TLB requests
@@ -134,6 +135,11 @@ class MockTLBPort
      * Check if there are pending PyMTL3 TLB responses
      */
     bool hasPendingPyMTL3TLBResps() const;
+
+    /**
+     * Check if there is a PyMTL3 TLB request with specific seqNum
+     */
+    bool hasPyMTL3TLBReqWithSeqNum(uint64_t seqNum) const;
 
     /**
      * Clear all recorded calls
@@ -153,10 +159,10 @@ class MockTLBPort
     static std::string callToString(const TLBCallRecord& call);
 
   private:
-    std::queue<TLBCallRecord> cppTLBReqs;
-    std::queue<TLBCallRecord> cppTLBResps;
-    std::queue<TLBCallRecord> pymtl3TLBReqs;
-    std::queue<TLBCallRecord> pymtl3TLBResps;
+    std::queue<TLBCallRecord> cppTLBResps;         // C++ TLB resps
+    std::queue<TLBCallRecord> cppInternalTLBReqs;  // C++ TLB reqs from executeStore/executeLoad
+    std::queue<TLBCallRecord> pymtl3TLBReqs;       // PyMTL3 TLB reqs
+    std::queue<TLBCallRecord> pymtl3TLBResps;      // PyMTL3 TLB resps
 };
 
 } // namespace o3

@@ -298,12 +298,13 @@ class LSQUnitComparison : public LSQUnit
      * @param fault Translation fault code (0 = NoFault)
      */
     void sendTLBResp(uint64_t seq_num, Addr paddr, int fault);
-    
+
     /**
-     * Complete a TLB translation request.
-     * Called by PyTLBRequest when translation finishes.
+     * Compare C++ internal TLB req (from executeStore/executeLoad) with PyMTL3 TLB req.
+     * This detects mismatches in TLB requests initiated internally by C++.
+     * @param seq_num Instruction sequence number
      */
-    void completeTLBTranslation(uint64_t seq_num, Addr paddr, Fault fault, bool delayed);
+    void compareCPInternalAndPyMTL3TLBReq(uint64_t seq_num);
 
     /**
      * Notify that PyMTL3 made a writeback call.
@@ -353,14 +354,8 @@ class LSQUnitComparison : public LSQUnit
     void handleRescheduleReq(uint64_t seqNum);
 
     /**
-     * Compare and drive TLB response to PyMTL3.
-     * Called when C++ TLB translation completes.
-     */
-    void compareAndDriveTLBResp(uint64_t seq_num, Addr paddr, int fault);
-
-    /**
      * Record a TLB request from PyMTL3.
-     * Called from Python via pymtl3_record_pymtl3_tlb_call.
+     * Called from handleTLBReq when PyMTL3 sends a TLB request.
      * Public to allow access from static callback function.
      */
     void recordPyMTL3TLBReq(uint64_t cycle, Addr vaddr, uint32_t size,
@@ -421,6 +416,22 @@ class LSQUnitComparison : public LSQUnit
     /** TLB response callback function pointer */
     void (*tlbRespCallback)(uint64_t, uint64_t, int);
 
+    // ===== TLB响应缓存（解决时序问题） =====
+    
+    /** Cached TLB response for handling timing mismatch between C++ and PyMTL3 */
+    struct CachedTLBResp {
+        uint64_t seqNum;
+        Addr paddr;
+        int fault;
+        uint64_t timestamp;
+        
+        CachedTLBResp(uint64_t sn, Addr pa, int f, uint64_t ts) 
+            : seqNum(sn), paddr(pa), fault(f), timestamp(ts) {}
+    };
+    
+    /** Cache for TLB responses that arrived before PyMTL3 request */
+    std::vector<CachedTLBResp> cachedTLBResps;
+
     /**
      * Log a mismatch.
      * @param methodName Name of the method.
@@ -443,6 +454,11 @@ class LSQUnitComparison : public LSQUnit
      * Compare IQ replay/reschedule calls between C++ and PyMTL3.
      */
     void compareIQCalls();
+
+    /**
+     * Compare DCache calls between C++ and PyMTL3.
+     */
+    void compareDCacheCalls();
 
     // Friend declaration for callback access
     friend void notify_dcache_call_from_pymtl3(uint64_t, Addr, uint32_t, bool,

@@ -37,21 +37,21 @@ PyTLBRequest::PyTLBRequest(Addr _vaddr, unsigned _size, bool _isLoad,
                                      0,  // pc
                                      tc ? tc->contextId() : 0);  // context_id
     
-    std::cerr << "[PyTLBRequest] Created for sn=" << seqNum 
+    std::cout << "[PyTLBRequest] Created for sn=" << seqNum 
               << " vaddr=0x" << std::hex << vaddr << std::dec
               << " size=" << size << " isLoad=" << isLoad << std::endl;
 }
 
 PyTLBRequest::~PyTLBRequest()
 {
-    std::cerr << "[PyTLBRequest] Destroyed for sn=" << seqNum << std::endl;
+    std::cout << "[PyTLBRequest] Destroyed for sn=" << seqNum << std::endl;
 }
 
 void
 PyTLBRequest::initiateTranslation()
 {
     if (!mmu || !tc) {
-        std::cerr << "[PyTLBRequest] ERROR: MMU or TC not available" << std::endl;
+        std::cout << "[PyTLBRequest] ERROR: MMU or TC not available" << std::endl;
         translationDone = true;
         translationFault = std::make_shared<GenericPageTableFault>(vaddr);
         if (finishCallback) {
@@ -60,7 +60,7 @@ PyTLBRequest::initiateTranslation()
         return;
     }
     
-    std::cerr << "[PyTLBRequest] Initiating translation for sn=" << seqNum 
+    std::cout << "[PyTLBRequest] Initiating translation for sn=" << seqNum 
               << " vaddr=0x" << std::hex << vaddr << std::dec << std::endl;
     
     // Call translateTiming - this is the same as LSQRequest::sendFragmentToTranslation
@@ -75,7 +75,7 @@ void
 PyTLBRequest::markDelayed()
 {
     translationDelayed = true;
-    std::cerr << "[PyTLBRequest] Translation delayed for sn=" << seqNum << std::endl;
+    std::cout << "[PyTLBRequest] Translation delayed for sn=" << seqNum << std::endl;
     
     // Notify Python that translation is delayed
     if (finishCallback) {
@@ -98,17 +98,20 @@ PyTLBRequest::finish(const Fault &fault, const RequestPtr &req,
         translatedPaddr = 0;
     }
     
-    std::cerr << "[PyTLBRequest] Translation finished for sn=" << seqNum;
+    std::cout << "[PyTLBRequest] Translation finished for sn=" << seqNum;
     if (fault == NoFault) {
-        std::cerr << " paddr=0x" << std::hex << translatedPaddr << std::dec;
+        std::cout << " paddr=0x" << std::hex << translatedPaddr << std::dec;
     } else {
-        std::cerr << " FAULT";
+        std::cout << " FAULT";
     }
-    std::cerr << " delayed=" << translationDelayed << std::endl;
+    std::cout << " delayed=" << translationDelayed << std::endl;
     
     // Notify Python
+    std::cout << "[PyTLBRequest] finishCallback=" << (finishCallback ? "set" : "NULL") << std::endl;
     if (finishCallback) {
         finishCallback(seqNum, translatedPaddr, fault, translationDelayed);
+    } else {
+        std::cout << "[PyTLBRequest] ERROR: finishCallback is NULL!" << std::endl;
     }
 }
 

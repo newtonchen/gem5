@@ -101,6 +101,22 @@ class MockDCachePort
     bool hasPendingPyMTL3Calls() const;
 
     /**
+     * Find and remove a C++ call by seqNum
+     * @param seqNum Sequence number to search for
+     * @param record Output parameter for the found record
+     * @return true if found and removed, false otherwise
+     */
+    bool findAndRemoveCPCallBySeqNum(uint64_t seqNum, DCacheCallRecord& record);
+
+    /**
+     * Remove expired calls from both C++ and PyMTL3 queues
+     * @param currentCycle Current simulation cycle
+     * @param timeoutCycles Number of cycles before a call is considered expired
+     * @return Number of expired calls removed
+     */
+    int removeExpiredCalls(uint64_t currentCycle, uint64_t timeoutCycles);
+
+    /**
      * Clear all recorded calls
      */
     void clear();

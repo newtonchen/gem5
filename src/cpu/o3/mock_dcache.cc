@@ -55,6 +55,14 @@ MockDCachePort::recordPyMTL3Call(uint64_t cycle, Addr addr, uint32_t size,
                                  const std::string& methodName,
                                  uint64_t seqNum)
 {
+    std::cout << "[MockDCache] MockDCachePort recordPyMTL3Call: cycle=" << cycle
+              << " addr=0x" << std::hex << addr << std::dec
+              << " size=" << size
+              << " isWrite=" << isWrite
+              << " method=" << methodName
+              << " seqNum=" << seqNum
+              << " queue_size=" << pymtl3Calls.size() << std::endl;
+
     DCacheCallRecord record;
     record.cycle = cycle;
     record.addr = addr;
@@ -65,6 +73,7 @@ MockDCachePort::recordPyMTL3Call(uint64_t cycle, Addr addr, uint32_t size,
     record.seqNum = seqNum;
 
     pymtl3Calls.push(record);
+    std::cout << "[MockDCache] recordPyMTL3Call: pushed, new queue_size=" << pymtl3Calls.size() << std::endl;
 }
 
 bool
@@ -99,6 +108,94 @@ bool
 MockDCachePort::hasPendingPyMTL3Calls() const
 {
     return !pymtl3Calls.empty();
+}
+
+bool
+MockDCachePort::findAndRemoveCPCallBySeqNum(uint64_t seqNum, DCacheCallRecord& record)
+{
+    std::queue<DCacheCallRecord> tempQueue;
+    bool found = false;
+
+    // Search through cppCalls queue
+    while (!cppCalls.empty()) {
+        DCacheCallRecord current = cppCalls.front();
+        cppCalls.pop();
+
+        if (!found && current.seqNum == seqNum) {
+            // Found the matching record
+            record = current;
+            found = true;
+        } else {
+            // Keep non-matching records
+            tempQueue.push(current);
+        }
+    }
+
+    // Restore non-matching records back to cppCalls
+    while (!tempQueue.empty()) {
+        cppCalls.push(tempQueue.front());
+        tempQueue.pop();
+    }
+
+    return found;
+}
+
+int
+MockDCachePort::removeExpiredCalls(uint64_t currentCycle, uint64_t timeoutCycles)
+{
+    int removedCount = 0;
+
+    // Remove expired C++ calls
+    std::queue<DCacheCallRecord> tempCPQueue;
+    while (!cppCalls.empty()) {
+        DCacheCallRecord current = cppCalls.front();
+        cppCalls.pop();
+
+        if (current.cycle + timeoutCycles < currentCycle) {
+            // Expired - print and discard
+            std::cout << "[MockDCache-EXPIRED] C++ DCache req expired: sn=" << current.seqNum
+                      << ", addr=0x" << std::hex << current.addr << std::dec
+                      << ", isWrite=" << current.isWrite
+                      << ", recorded at cycle=" << current.cycle
+                      << ", current cycle=" << currentCycle << std::endl;
+            removedCount++;
+        } else {
+            // Not expired - keep it
+            tempCPQueue.push(current);
+        }
+    }
+    // Restore non-expired C++ calls
+    while (!tempCPQueue.empty()) {
+        cppCalls.push(tempCPQueue.front());
+        tempCPQueue.pop();
+    }
+
+    // Remove expired PyMTL3 calls
+    std::queue<DCacheCallRecord> tempPyQueue;
+    while (!pymtl3Calls.empty()) {
+        DCacheCallRecord current = pymtl3Calls.front();
+        pymtl3Calls.pop();
+
+        if (current.cycle + timeoutCycles < currentCycle) {
+            // Expired - print and discard
+            std::cout << "[MockDCache-EXPIRED] PyMTL3 DCache req expired: sn=" << current.seqNum
+                      << ", addr=0x" << std::hex << current.addr << std::dec
+                      << ", isWrite=" << current.isWrite
+                      << ", recorded at cycle=" << current.cycle
+                      << ", current cycle=" << currentCycle << std::endl;
+            removedCount++;
+        } else {
+            // Not expired - keep it
+            tempPyQueue.push(current);
+        }
+    }
+    // Restore non-expired PyMTL3 calls
+    while (!tempPyQueue.empty()) {
+        pymtl3Calls.push(tempPyQueue.front());
+        tempPyQueue.pop();
+    }
+
+    return removedCount;
 }
 
 void

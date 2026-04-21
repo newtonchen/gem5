@@ -32,8 +32,10 @@ static py::module* gem5_pymtl3_module = nullptr;
 static py::object* py_wrapper_class = nullptr;
 
 // 全局 LSQUnitComparison 实例指针，用于回调函数访问
+// 注意：这个变量在 lsq_unit_comparison.cc 中定义（在 gem5::o3 命名空间中）
+// 这里使用 extern 声明（已在 gem5::o3 命名空间中）
 class LSQUnitComparison;
-static LSQUnitComparison* g_currentLSQUnitComparison = nullptr;
+extern LSQUnitComparison* g_currentLSQUnitComparison;
 
 /**
  * Get the project root directory.
@@ -114,12 +116,12 @@ init_pymtl3_module()
         std::cout << "[LSQComparison] PyMTL3 module initialization complete" << std::endl;
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
     } catch (const std::exception& e) {
-        std::cerr << "[LSQComparison] Error: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Error: " << e.what() << std::endl;
     }
 }
 
@@ -137,7 +139,7 @@ create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries)
     }
 
     if (!py_wrapper_class) {
-        std::cerr << "[LSQComparison] PyMTL3 wrapper class not available" << std::endl;
+        std::cout << "[LSQComparison] PyMTL3 wrapper class not available" << std::endl;
         return nullptr;
     }
 
@@ -152,7 +154,7 @@ create_pymtl3_lsq(uint32_t lqEntries, uint32_t sqEntries)
         return static_cast<void*>(wrapper_ptr);
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error creating wrapper: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error creating wrapper: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -199,7 +201,7 @@ pymtl3_insert_load(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint32
         return result;
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in insert_load: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in insert_load: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -250,7 +252,7 @@ pymtl3_insert_store(void* lsq, uint64_t seq_num, uint64_t pc, uint64_t ea, uint3
         return result;
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in insert_store: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in insert_store: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -275,7 +277,7 @@ pymtl3_commit_load(void* lsq)
         (*wrapper).attr("commit_load")();
         return nullptr;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in commit_load: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in commit_load: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -301,7 +303,7 @@ pymtl3_commit_stores(void* lsq, uint64_t youngest_sn)
         int count = (*wrapper).attr("commit_stores")(youngest_sn).cast<int>();
         return count;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in commit_stores: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in commit_stores: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -327,7 +329,7 @@ pymtl3_squash(void* lsq, uint64_t squash_sn)
         int count = (*wrapper).attr("squash")(squash_sn).cast<int>();
         return count;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in squash: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in squash: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -352,7 +354,7 @@ pymtl3_num_loads(void* lsq)
         int count = (*wrapper).attr("num_loads")().cast<int>();
         return count;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in num_loads: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in num_loads: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -377,7 +379,7 @@ pymtl3_num_stores(void* lsq)
         int count = (*wrapper).attr("num_stores")().cast<int>();
         return count;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in num_stores: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in num_stores: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -403,7 +405,7 @@ pymtl3_get_stat(void* lsq, const std::string &stat_name)
         uint64_t value = (*wrapper).attr("get_stat")(stat_name).cast<uint64_t>();
         return value;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in get_stat: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in get_stat: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -455,7 +457,7 @@ pymtl3_set_dcache_callback(void* lsq,
         std::cout << "[LSQComparison] DCache callback set for PyMTL3" << std::endl;
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_dcache_callback: "
+        std::cout << "[LSQComparison] Python error in set_dcache_callback: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -501,45 +503,7 @@ pymtl3_set_tlb_resp_callback(void* lsq,
         std::cout << "[LSQComparison] TLB resp callback set for PyMTL3" << std::endl;
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_tlb_resp_callback: "
-                  << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-/**
- * Record a TLB call from PyMTL3.
- * Called by Python wrapper when PyMTL3 makes a TLB translation request.
- *
- * @param lsq Pointer to PyMTL3 wrapper instance (py::object*).
- * @param seq_num Instruction sequence number.
- * @param vaddr Virtual address.
- * @param size Access size.
- * @param is_load True for load, False for store.
- * @param method_name Method name ('translateReq' or 'translateResp').
- * @param paddr Physical address (for response).
- * @param fault Fault status.
- */
-void
-pymtl3_record_tlb_call(void* lsq, uint64_t seq_num, uint64_t vaddr,
-                        uint32_t size, bool is_load, const std::string& method_name,
-                        uint64_t paddr, int fault)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-
-        // Call the wrapper's record_tlb_call method
-        (*wrapper).attr("record_tlb_call")(seq_num, vaddr, size, is_load,
-                                           method_name, paddr, fault);
-
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in record_tlb_call: "
+        std::cout << "[LSQComparison] Python error in set_tlb_resp_callback: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -578,7 +542,7 @@ pymtl3_send_dcache_resp(void* lsq, uint64_t seq_num,
         (*wrapper).attr("send_dcache_resp")(seq_num, data_bytes, data_size, is_write);
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in send_dcache_resp: " 
+        std::cout << "[LSQComparison] Python error in send_dcache_resp: " 
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -603,7 +567,7 @@ pymtl3_get_cycle(void* lsq)
         uint64_t cycle = (*wrapper).attr("get_current_cycle")().cast<uint64_t>();
         return cycle;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in get_cycle: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in get_cycle: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -634,7 +598,7 @@ pymtl3_tick(void* lsq, uint64_t current_cycle)
 
         (*wrapper).attr("tick")(current_cycle);
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in tick: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in tick: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -666,7 +630,7 @@ pymtl3_process_store_writebacks(void* lsq)
         // The writeback_stores interface corresponds to LSQUnitCL.writeback_stores CalleeIfcCL
         (*wrapper).attr("writeback_stores")();
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in writeback_stores: "
+        std::cout << "[LSQComparison] Python error in writeback_stores: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -708,78 +672,7 @@ pymtl3_set_tlb_req_callback(void* lsq,
         std::cout << "[LSQComparison] TLB request callback set for PyMTL3" << std::endl;
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_tlb_req_callback: " 
-                  << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-    }
-}
-
-/**
- * Translate virtual address to physical address using PyMTL3's TLB callback.
- * This is called when PyMTL3 needs to translate an address.
- * 
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param vaddr Virtual address to translate.
- * @return Physical address.
- */
-uint64_t
-pymtl3_translate_address(void* lsq, uint64_t vaddr)
-{
-    if (!lsq) {
-        return vaddr;  // Identity mapping if no wrapper
-    }
-
-    try {
-        py::object* wrapper = static_cast<py::object*>(lsq);
-        uint64_t paddr = (*wrapper).attr("translate_address")(vaddr).cast<uint64_t>();
-        return paddr;
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in translate_address: " 
-                  << e.what() << std::endl;
-        if (PyErr_Occurred()) {
-            PyErr_Print();
-        }
-        return vaddr;  // Return vaddr on error
-    }
-}
-
-/**
- * Record a TLB call from PyMTL3 LSQUnitCL.
- * This is called from Python when PyMTL3 makes a TLB translation request.
- * The call is recorded in MockTLBPort for comparison.
- *
- * @param lsq Pointer to PyMTL3 wrapper instance.
- * @param seq_num Instruction sequence number.
- * @param vaddr Virtual address.
- * @param size Access size.
- * @param is_load True for load, False for store.
- * @param method_name Method name ('translateReq').
- */
-void
-pymtl3_record_pymtl3_tlb_call(void* lsq, uint64_t seq_num, uint64_t vaddr,
-                                uint32_t size, bool is_load,
-                                const std::string& method_name)
-{
-    if (!lsq) {
-        return;
-    }
-
-    try {
-        // Get the current LSQUnitComparison instance from global
-        if (!g_currentLSQUnitComparison) {
-            std::cerr << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
-            return;
-        }
-
-        if (method_name == "translateReq") {
-            g_currentLSQUnitComparison->recordPyMTL3TLBReq(
-                curTick(), vaddr, size, is_load, seq_num);
-        }
-
-    } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in record_pymtl3_tlb_call: "
+        std::cout << "[LSQComparison] Python error in set_tlb_req_callback: " 
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -817,14 +710,14 @@ pymtl3_record_replay_call(void* lsq, uint64_t seq_num)
 
     try {
         if (!g_currentLSQUnitComparison) {
-            std::cerr << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
+            std::cout << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
             return;
         }
 
         g_currentLSQUnitComparison->recordPyMTL3Replay(curTick(), seq_num);
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in record_replay_call: "
+        std::cout << "[LSQComparison] Python error in record_replay_call: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -848,14 +741,14 @@ pymtl3_record_reschedule_call(void* lsq, uint64_t seq_num)
 
     try {
         if (!g_currentLSQUnitComparison) {
-            std::cerr << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
+            std::cout << "[LSQComparison] g_currentLSQUnitComparison is null" << std::endl;
             return;
         }
 
         g_currentLSQUnitComparison->recordPyMTL3Reschedule(curTick(), seq_num);
 
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in record_reschedule_call: "
+        std::cout << "[LSQComparison] Python error in record_reschedule_call: "
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -893,7 +786,7 @@ pymtl3_execute_load(void* lsq, uint64_t seq_num, int lq_idx,
             request_size).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in execute_load: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -942,7 +835,7 @@ pymtl3_execute_store(void* lsq, uint64_t seq_num, int sq_idx,
             was_translation_delayed, was_read_predicate).cast<int>();
         return fault;
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in execute_store: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in execute_store: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
@@ -990,7 +883,7 @@ pymtl3_set_writeback_callback(void* lsq,
         std::cout << "[LSQComparison] Writeback callback set for PyMTL3" << std::endl;
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_writeback_callback: " 
+        std::cout << "[LSQComparison] Python error in set_writeback_callback: " 
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -1030,7 +923,7 @@ pymtl3_set_iq_callback(void* lsq,
         std::cout << "[LSQComparison] IQ callback set for PyMTL3" << std::endl;
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_iq_callback: " 
+        std::cout << "[LSQComparison] Python error in set_iq_callback: " 
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -1068,7 +961,7 @@ pymtl3_set_tlb_resp_callback(void* lsq,
         std::cout << "[LSQComparison] TLB response callback set for PyMTL3" << std::endl;
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_tlb_resp_callback: " 
+        std::cout << "[LSQComparison] Python error in set_tlb_resp_callback: " 
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -1094,7 +987,7 @@ pymtl3_send_tlb_resp(void* lsq, uint64_t seq_num, uint64_t paddr, int fault)
         (*wrapper).attr("handle_tlb_resp")(seq_num, paddr, fault);
         
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in send_tlb_resp: " 
+        std::cout << "[LSQComparison] Python error in send_tlb_resp: " 
                   << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
@@ -1118,7 +1011,7 @@ pymtl3_set_debug_enabled(void* lsq, bool enabled)
         py::object* wrapper = static_cast<py::object*>(lsq);
         (*wrapper).attr("set_debug_enabled")(enabled);
     } catch (const py::error_already_set& e) {
-        std::cerr << "[LSQComparison] Python error in set_debug_enabled: " << e.what() << std::endl;
+        std::cout << "[LSQComparison] Python error in set_debug_enabled: " << e.what() << std::endl;
         if (PyErr_Occurred()) {
             PyErr_Print();
         }
