@@ -238,6 +238,9 @@ class LSQUnitComparison : public LSQUnit
     /** Check for stale translations. */
     bool checkStaleTranslations();
 
+    /** Compare writeback calls between C++ and PyMTL3. */
+    void compareWritebackCalls();
+
     /** Complete data access. */
     void completeDataAccess(PacketPtr pkt);
 

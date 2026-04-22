@@ -970,6 +970,111 @@ LSQUnitComparison::compareStatistics()
 
     // 对比 DCache 请求
     compareDCacheCalls();
+
+    // 对比 Writeback 调用
+    compareWritebackCalls();
+}
+
+void
+LSQUnitComparison::compareWritebackCalls()
+{
+    // Step 1: 遍历 C++ 的 writeback 记录，在 PyMTL3 记录中查找相同 seqNum 的请求并比较
+    while (!cppWritebackCalls.empty()) {
+        WritebackRecord cpRecord = cppWritebackCalls.front();
+        cppWritebackCalls.pop();
+
+        // 在 PyMTL3 writeback 记录中查找相同 seqNum 的记录
+        bool found = false;
+        std::queue<WritebackRecord> tempQueue;
+        WritebackRecord pyRecord;
+
+        while (!pymtl3WritebackCalls.empty()) {
+            WritebackRecord current = pymtl3WritebackCalls.front();
+            pymtl3WritebackCalls.pop();
+
+            if (!found && current.seqNum == cpRecord.seqNum) {
+                pyRecord = current;
+                found = true;
+            } else {
+                tempQueue.push(current);
+            }
+        }
+
+        // 恢复未匹配的记录
+        while (!tempQueue.empty()) {
+            pymtl3WritebackCalls.push(tempQueue.front());
+            tempQueue.pop();
+        }
+
+        if (found) {
+            // 找到了匹配的 PyMTL3 writeback 记录，进行比较
+            std::string reason;
+            bool match = true;
+
+            // 比较 fault 状态
+            if (cpRecord.fault != pyRecord.fault) {
+                reason = csprintf("fault mismatch: C++=%d, PyMTL3=%d",
+                                  cpRecord.fault, pyRecord.fault);
+                match = false;
+            }
+
+            // 比较 hasData 标志
+            if (match && cpRecord.hasData != pyRecord.hasData) {
+                reason = csprintf("hasData mismatch: C++=%d, PyMTL3=%d",
+                                  cpRecord.hasData ? 1 : 0,
+                                  pyRecord.hasData ? 1 : 0);
+                match = false;
+            }
+
+            // 比较数据（如果都有数据）
+            if (match && cpRecord.hasData && pyRecord.hasData) {
+                if (cpRecord.data.size() != pyRecord.data.size()) {
+                    reason = csprintf("data size mismatch: C++=%zu, PyMTL3=%zu",
+                                      cpRecord.data.size(), pyRecord.data.size());
+                    match = false;
+                } else {
+                    // 逐字节比较数据
+                    for (size_t i = 0; i < cpRecord.data.size(); i++) {
+                        if (cpRecord.data[i] != pyRecord.data[i]) {
+                            reason = csprintf("data mismatch at byte %zu: C++=0x%02x, PyMTL3=0x%02x",
+                                              i, cpRecord.data[i], pyRecord.data[i]);
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (match) {
+                DPRINTF(PyMTL3, "[WritebackCompare] sn=%lu: Match OK\n", cpRecord.seqNum);
+            } else {
+                logMismatch("Writeback", reason);
+                std::cout << "[LSQComparison] Mismatch in Writeback: sn="
+                          << cpRecord.seqNum << ", " << reason << std::endl;
+            }
+        } else {
+            // 没有找到匹配的 PyMTL3 writeback 记录
+            logMismatch("Writeback",
+                csprintf("C++ has writeback but PyMTL3 does not [sn=%lu, fault=%d, hasData=%d]",
+                         cpRecord.seqNum, cpRecord.fault, cpRecord.hasData ? 1 : 0));
+            std::cout << "[LSQComparison] C++ writeback not matched: sn="
+                      << cpRecord.seqNum << ", fault=" << cpRecord.fault
+                      << ", hasData=" << (cpRecord.hasData ? 1 : 0) << std::endl;
+        }
+    }
+
+    // Step 2: 处理剩余的 PyMTL3 writeback 记录（C++ 中没有对应的记录）
+    while (!pymtl3WritebackCalls.empty()) {
+        WritebackRecord pyRecord = pymtl3WritebackCalls.front();
+        pymtl3WritebackCalls.pop();
+
+        logMismatch("Writeback",
+            csprintf("PyMTL3 has writeback but C++ does not [sn=%lu, fault=%d, hasData=%d]",
+                     pyRecord.seqNum, pyRecord.fault, pyRecord.hasData ? 1 : 0));
+        std::cout << "[LSQComparison] PyMTL3 writeback not matched: sn="
+                  << pyRecord.seqNum << ", fault=" << pyRecord.fault
+                  << ", hasData=" << (pyRecord.hasData ? 1 : 0) << std::endl;
+    }
 }
 
 void
