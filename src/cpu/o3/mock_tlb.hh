@@ -142,6 +142,31 @@ class MockTLBPort
     bool hasPyMTL3TLBReqWithSeqNum(uint64_t seqNum) const;
 
     /**
+     * Find and remove a C++ internal TLB request by seqNum.
+     * Used for PyMTL3-first matching mechanism.
+     * @param seqNum Sequence number to search for
+     * @param record Output parameter for the found record
+     * @return true if found and removed, false otherwise
+     */
+    bool findAndRemoveCPInternalTLBReqBySeqNum(uint64_t seqNum, TLBCallRecord& record);
+
+    /**
+     * Remove expired C++ internal TLB requests (older than timeout).
+     * @param currentTick Current tick
+     * @param timeoutCycles Timeout in cycles
+     * @return Number of expired records removed
+     */
+    int removeExpiredCPInternalTLBReqs(uint64_t currentTick, uint64_t timeoutCycles);
+
+    /**
+     * Remove expired PyMTL3 TLB requests (older than timeout).
+     * @param currentTick Current tick
+     * @param timeoutCycles Timeout in cycles
+     * @return Number of expired records removed
+     */
+    int removeExpiredPyMTL3TLBReqs(uint64_t currentTick, uint64_t timeoutCycles);
+
+    /**
      * Clear all recorded calls
      */
     void clear();

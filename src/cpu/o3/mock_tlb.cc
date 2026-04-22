@@ -173,6 +173,78 @@ MockTLBPort::clear()
 }
 
 bool
+MockTLBPort::findAndRemoveCPInternalTLBReqBySeqNum(uint64_t seqNum, TLBCallRecord& record)
+{
+    std::queue<TLBCallRecord> tempQueue;
+    bool found = false;
+
+    while (!cppInternalTLBReqs.empty()) {
+        TLBCallRecord current = cppInternalTLBReqs.front();
+        cppInternalTLBReqs.pop();
+
+        if (!found && current.seqNum == seqNum) {
+            record = current;
+            found = true;
+        } else {
+            tempQueue.push(current);
+        }
+    }
+
+    while (!tempQueue.empty()) {
+        cppInternalTLBReqs.push(tempQueue.front());
+        tempQueue.pop();
+    }
+
+    return found;
+}
+
+int
+MockTLBPort::removeExpiredCPInternalTLBReqs(uint64_t currentTick, uint64_t timeoutCycles)
+{
+    // 假设 500 ticks/cycle
+    const uint64_t timeoutTick = currentTick - timeoutCycles * 500;
+    int expiredCount = 0;
+    std::queue<TLBCallRecord> tempQueue;
+
+    while (!cppInternalTLBReqs.empty()) {
+        TLBCallRecord record = cppInternalTLBReqs.front();
+        cppInternalTLBReqs.pop();
+        if (record.cycle < timeoutTick) {
+            expiredCount++;
+            std::cout << "[MockTLB] C++ internal TLB req expired: sn=" << record.seqNum << std::endl;
+        } else {
+            tempQueue.push(record);
+        }
+    }
+
+    cppInternalTLBReqs = std::move(tempQueue);
+    return expiredCount;
+}
+
+int
+MockTLBPort::removeExpiredPyMTL3TLBReqs(uint64_t currentTick, uint64_t timeoutCycles)
+{
+    // 假设 500 ticks/cycle
+    const uint64_t timeoutTick = currentTick - timeoutCycles * 500;
+    int expiredCount = 0;
+    std::queue<TLBCallRecord> tempQueue;
+
+    while (!pymtl3TLBReqs.empty()) {
+        TLBCallRecord record = pymtl3TLBReqs.front();
+        pymtl3TLBReqs.pop();
+        if (record.cycle < timeoutTick) {
+            expiredCount++;
+            std::cout << "[MockTLB] PyMTL3 TLB req expired: sn=" << record.seqNum << std::endl;
+        } else {
+            tempQueue.push(record);
+        }
+    }
+
+    pymtl3TLBReqs = std::move(tempQueue);
+    return expiredCount;
+}
+
+bool
 MockTLBPort::compareCalls(const TLBCallRecord& cppCall,
                          const TLBCallRecord& pymtl3Call,
                          std::string& reason)

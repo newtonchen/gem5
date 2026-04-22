@@ -1437,32 +1437,41 @@ LSQUnitComparison::compareCPInternalAndPyMTL3TLBReq(uint64_t seq_num)
         return;
     }
 
-    // 获取 C++ 内部 TLB 请求
-    TLBCallRecord cppReq;
-    if (!mockTLB->getNextCPInternalTLBReq(cppReq)) {
-        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: No C++ internal TLB req\n",
-                seq_num);
-        return;  // 没有 C++ 内部 TLB 请求
-    }
-
-    // 获取 PyMTL3 TLB 请求
+    // 使用 PyMTL3 优先机制：遍历 PyMTL3 TLB 请求，在 C++ 中查找匹配
     TLBCallRecord pymtl3Req;
-    if (!mockTLB->getNextPyMTL3TLBReq(pymtl3Req)) {
-        // PyMTL3 没有对应的请求，可能是 C++ 独有的
-        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: C++ internal TLB req but no PyMTL3 req\n",
-                seq_num);
-        return;
+    while (mockTLB->getNextPyMTL3TLBReq(pymtl3Req)) {
+        TLBCallRecord cppReq;
+        
+        // 在 C++ 内部 TLB 请求中查找相同 seqNum 的记录
+        if (mockTLB->findAndRemoveCPInternalTLBReqBySeqNum(pymtl3Req.seqNum, cppReq)) {
+            // 找到了匹配的 C++ TLB 请求，进行比较
+            std::string reason;
+            if (MockTLBPort::compareCalls(cppReq, pymtl3Req, reason)) {
+                DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: Match OK\n", pymtl3Req.seqNum);
+            } else {
+                std::cout << "[LSQComparison] Mismatch in TLB req: sn=" 
+                          << pymtl3Req.seqNum << ", " << reason << std::endl;
+                DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: MISMATCH - %s\n", 
+                        pymtl3Req.seqNum, reason);
+            }
+        } else {
+            // 没有找到匹配的 C++ TLB 请求
+            std::cout << "[LSQComparison] PyMTL3 TLB req not matched: sn=" 
+                      << pymtl3Req.seqNum << std::endl;
+            DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: PyMTL3 has TLB req but C++ does not\n",
+                    pymtl3Req.seqNum);
+        }
     }
 
-    // 对比请求
-    std::string reason;
-    if (!MockTLBPort::compareCalls(cppReq, pymtl3Req, reason)) {
-        std::cout << "[LSQComparison] Mismatch in TLB req (C++ internal vs PyMTL3): sn=" 
-                  << seq_num << ", " << reason << std::endl;
-        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: MISMATCH - %s\n", seq_num, reason);
-    } else {
-        DPRINTF(PyMTL3, "[TLBCompare] sn=%llu: TLB req match (C++ internal vs PyMTL3)\n",
-                seq_num);
+    // 清理超时的 TLB 请求（超过 200 个 cycle 未匹配）
+    const uint64_t timeoutCycles = 200;
+    int cpExpired = mockTLB->removeExpiredCPInternalTLBReqs(curTick(), timeoutCycles);
+    int pyExpired = mockTLB->removeExpiredPyMTL3TLBReqs(curTick(), timeoutCycles);
+    int totalExpired = cpExpired + pyExpired;
+    if (totalExpired > 0) {
+        std::cout << "[LSQComparison] Removed " << totalExpired << " expired TLB requests "
+                  << "(C++=" << cpExpired << ", PyMTL3=" << pyExpired
+                  << ", timeout=" << timeoutCycles << " cycles)" << std::endl;
     }
 }
 
