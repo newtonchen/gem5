@@ -146,6 +146,128 @@ MockIQPort::clear()
 }
 
 bool
+MockIQPort::findAndRemoveCPReplayBySeqNum(uint64_t seqNum, IQCallRecord& record)
+{
+    std::queue<IQCallRecord> tempQueue;
+    bool found = false;
+
+    while (!cppReplays.empty()) {
+        IQCallRecord current = cppReplays.front();
+        cppReplays.pop();
+
+        if (!found && current.seqNum == seqNum) {
+            record = current;
+            found = true;
+        } else {
+            tempQueue.push(current);
+        }
+    }
+
+    while (!tempQueue.empty()) {
+        cppReplays.push(tempQueue.front());
+        tempQueue.pop();
+    }
+
+    return found;
+}
+
+bool
+MockIQPort::findAndRemoveCPRescheduleBySeqNum(uint64_t seqNum, IQCallRecord& record)
+{
+    std::queue<IQCallRecord> tempQueue;
+    bool found = false;
+
+    while (!cppReschedules.empty()) {
+        IQCallRecord current = cppReschedules.front();
+        cppReschedules.pop();
+
+        if (!found && current.seqNum == seqNum) {
+            record = current;
+            found = true;
+        } else {
+            tempQueue.push(current);
+        }
+    }
+
+    while (!tempQueue.empty()) {
+        cppReschedules.push(tempQueue.front());
+        tempQueue.pop();
+    }
+
+    return found;
+}
+
+int
+MockIQPort::removeExpiredReplays(uint64_t currentTick, uint64_t timeoutCycles)
+{
+    // 假设 500 ticks/cycle
+    const uint64_t timeoutTick = currentTick - timeoutCycles * 500;
+    int expiredCount = 0;
+    std::queue<IQCallRecord> tempQueue;
+
+    while (!cppReplays.empty()) {
+        IQCallRecord record = cppReplays.front();
+        cppReplays.pop();
+        if (record.cycle < timeoutTick) {
+            expiredCount++;
+            std::cout << "[MockIQ] C++ replay expired: sn=" << record.seqNum << std::endl;
+        } else {
+            tempQueue.push(record);
+        }
+    }
+
+    while (!pymtl3Replays.empty()) {
+        IQCallRecord record = pymtl3Replays.front();
+        pymtl3Replays.pop();
+        if (record.cycle < timeoutTick) {
+            expiredCount++;
+            std::cout << "[MockIQ] PyMTL3 replay expired: sn=" << record.seqNum << std::endl;
+        } else {
+            tempQueue.push(record);
+        }
+    }
+
+    cppReplays = std::move(tempQueue);
+    return expiredCount;
+}
+
+int
+MockIQPort::removeExpiredReschedules(uint64_t currentTick, uint64_t timeoutCycles)
+{
+    // 假设 500 ticks/cycle
+    const uint64_t timeoutTick = currentTick - timeoutCycles * 500;
+    int expiredCount = 0;
+    std::queue<IQCallRecord> tempQueue;
+
+    while (!cppReschedules.empty()) {
+        IQCallRecord record = cppReschedules.front();
+        cppReschedules.pop();
+        if (record.cycle < timeoutTick) {
+            expiredCount++;
+            std::cout << "[MockIQ] C++ reschedule expired: sn=" << record.seqNum << std::endl;
+        } else {
+            tempQueue.push(record);
+        }
+    }
+
+    cppReschedules = std::move(tempQueue);
+
+    while (!pymtl3Reschedules.empty()) {
+        IQCallRecord record = pymtl3Reschedules.front();
+        pymtl3Reschedules.pop();
+        if (record.cycle < timeoutTick) {
+            expiredCount++;
+            std::cout << "[MockIQ] PyMTL3 reschedule expired: sn=" << record.seqNum << std::endl;
+        } else {
+            tempQueue.push(record);
+        }
+    }
+
+    pymtl3Reschedules = std::move(tempQueue);
+    return expiredCount;
+}
+
+bool
 MockIQPort::compareCalls(const IQCallRecord& cppCall,
                         const IQCallRecord& pymtl3Call,
                         std::string& reason)

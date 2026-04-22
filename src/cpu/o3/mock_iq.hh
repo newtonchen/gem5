@@ -122,6 +122,40 @@ class MockIQPort
     void clear();
 
     /**
+     * Find and remove a C++ replay call by seqNum.
+     * Used for PyMTL3-first matching mechanism.
+     * @param seqNum Sequence number to search for
+     * @param record Output parameter for the found record
+     * @return true if found and removed, false otherwise
+     */
+    bool findAndRemoveCPReplayBySeqNum(uint64_t seqNum, IQCallRecord& record);
+
+    /**
+     * Find and remove a C++ reschedule call by seqNum.
+     * Used for PyMTL3-first matching mechanism.
+     * @param seqNum Sequence number to search for
+     * @param record Output parameter for the found record
+     * @return true if found and removed, false otherwise
+     */
+    bool findAndRemoveCPRescheduleBySeqNum(uint64_t seqNum, IQCallRecord& record);
+
+    /**
+     * Remove expired replay calls (older than timeout).
+     * @param currentTick Current tick
+     * @param timeoutCycles Timeout in cycles
+     * @return Number of expired records removed
+     */
+    int removeExpiredReplays(uint64_t currentTick, uint64_t timeoutCycles);
+
+    /**
+     * Remove expired reschedule calls (older than timeout).
+     * @param currentTick Current tick
+     * @param timeoutCycles Timeout in cycles
+     * @return Number of expired records removed
+     */
+    int removeExpiredReschedules(uint64_t currentTick, uint64_t timeoutCycles);
+
+    /**
      * Compare two IQ calls and return mismatch reason
      */
     static bool compareCalls(const IQCallRecord& cppCall,

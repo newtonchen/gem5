@@ -1116,48 +1116,69 @@ LSQUnitComparison::compareIQCalls()
         return;
     }
 
-    // 对比 Replay 调用
-    while (mockIQ->hasPendingCPReplays() || mockIQ->hasPendingPyMTL3Replays()) {
-        IQCallRecord cpRecord, pyRecord;
-        bool hasCP = mockIQ->getNextCPReplay(cpRecord);
-        bool hasPy = mockIQ->getNextPyMTL3Replay(pyRecord);
-
-        if (hasCP && hasPy) {
+    // 对比 Replay 调用 - PyMTL3优先机制
+    // Step 1: 遍历 PyMTL3 的 replay 记录，在 C++ 中查找匹配
+    IQCallRecord pyRecord;
+    while (mockIQ->getNextPyMTL3Replay(pyRecord)) {
+        IQCallRecord cpRecord;
+        
+        // 在 C++ replay 记录中查找相同 seqNum 的记录
+        if (mockIQ->findAndRemoveCPReplayBySeqNum(pyRecord.seqNum, cpRecord)) {
+            // 找到了匹配的 C++ replay 记录，进行比较
             std::string reason;
-            if (!MockIQPort::compareCalls(cpRecord, pyRecord, reason)) {
+            if (MockIQPort::compareCalls(cpRecord, pyRecord, reason)) {
+                DPRINTF(PyMTL3, "[IQCompare] replay sn=%lu: Match OK\n", pyRecord.seqNum);
+            } else {
                 logMismatch("IQ.replay", reason);
+                std::cout << "[LSQComparison] Mismatch in IQ.replay: sn="
+                          << pyRecord.seqNum << ", " << reason << std::endl;
             }
-        } else if (hasCP) {
+        } else {
+            // 没有找到匹配的 C++ replay 记录
             logMismatch("IQ.replay",
-                csprintf("C++ has replay but PyMTL3 does not [sn=%d]",
-                         cpRecord.seqNum));
-        } else if (hasPy) {
-            logMismatch("IQ.replay",
-                csprintf("PyMTL3 has replay but C++ does not [sn=%d]",
+                csprintf("PyMTL3 has replay but C++ does not [sn=%lu]",
                          pyRecord.seqNum));
+            std::cout << "[LSQComparison] PyMTL3 replay not matched: sn="
+                      << pyRecord.seqNum << std::endl;
         }
     }
 
-    // 对比 Reschedule 调用
-    while (mockIQ->hasPendingCPReschedules() || mockIQ->hasPendingPyMTL3Reschedules()) {
-        IQCallRecord cpRecord, pyRecord;
-        bool hasCP = mockIQ->getNextCPReschedule(cpRecord);
-        bool hasPy = mockIQ->getNextPyMTL3Reschedule(pyRecord);
-
-        if (hasCP && hasPy) {
+    // 对比 Reschedule 调用 - PyMTL3优先机制
+    // Step 1: 遍历 PyMTL3 的 reschedule 记录，在 C++ 中查找匹配
+    IQCallRecord pyRescheduleRecord;
+    while (mockIQ->getNextPyMTL3Reschedule(pyRescheduleRecord)) {
+        IQCallRecord cpRescheduleRecord;
+        
+        // 在 C++ reschedule 记录中查找相同 seqNum 的记录
+        if (mockIQ->findAndRemoveCPRescheduleBySeqNum(pyRescheduleRecord.seqNum, cpRescheduleRecord)) {
+            // 找到了匹配的 C++ reschedule 记录，进行比较
             std::string reason;
-            if (!MockIQPort::compareCalls(cpRecord, pyRecord, reason)) {
+            if (MockIQPort::compareCalls(cpRescheduleRecord, pyRescheduleRecord, reason)) {
+                DPRINTF(PyMTL3, "[IQCompare] reschedule sn=%lu: Match OK\n", pyRescheduleRecord.seqNum);
+            } else {
                 logMismatch("IQ.reschedule", reason);
+                std::cout << "[LSQComparison] Mismatch in IQ.reschedule: sn="
+                          << pyRescheduleRecord.seqNum << ", " << reason << std::endl;
             }
-        } else if (hasCP) {
+        } else {
+            // 没有找到匹配的 C++ reschedule 记录
             logMismatch("IQ.reschedule",
-                csprintf("C++ has reschedule but PyMTL3 does not [sn=%d]",
-                         cpRecord.seqNum));
-        } else if (hasPy) {
-            logMismatch("IQ.reschedule",
-                csprintf("PyMTL3 has reschedule but C++ does not [sn=%d]",
-                         pyRecord.seqNum));
+                csprintf("PyMTL3 has reschedule but C++ does not [sn=%lu]",
+                         pyRescheduleRecord.seqNum));
+            std::cout << "[LSQComparison] PyMTL3 reschedule not matched: sn="
+                      << pyRescheduleRecord.seqNum << std::endl;
         }
+    }
+
+    // Step 2: 清理超时的 replay 和 reschedule 记录（超过 200 个 cycle 未匹配）
+    const uint64_t timeoutCycles = 200;
+    int replayExpired = mockIQ->removeExpiredReplays(curTick(), timeoutCycles);
+    int rescheduleExpired = mockIQ->removeExpiredReschedules(curTick(), timeoutCycles);
+    int totalExpired = replayExpired + rescheduleExpired;
+    if (totalExpired > 0) {
+        std::cout << "[LSQComparison] Removed " << totalExpired << " expired IQ calls "
+                  << "(replay=" << replayExpired << ", reschedule=" << rescheduleExpired
+                  << ", timeout=" << timeoutCycles << " cycles)" << std::endl;
     }
 }
 
