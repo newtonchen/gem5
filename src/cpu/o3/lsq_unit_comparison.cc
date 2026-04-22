@@ -452,16 +452,9 @@ LSQUnitComparison::executeLoad(const DynInstPtr &inst)
                 vaddrValid = true;
                 DPRINTF(PyMTL3, "executeLoad sn=%llu: using inst->effAddr=0x%llx (valid=%d)\n",
                         seq_num, vaddr, inst->effAddrValid());
-            } else if (inst->effAddr != 0) {
-                // effAddrValid is false but effAddr is set (e.g., after partial coverage reschedule)
-                // Use effAddr as it's the authoritative address from previous execution
-                vaddr = inst->effAddr;
-                vaddrValid = true;
-                DPRINTF(PyMTL3, "executeLoad sn=%llu: using inst->effAddr=0x%llx (valid=%d, but non-zero)\n",
-                        seq_num, vaddr, inst->effAddrValid());
             } else {
                 vaddr = calculateLoadVaddr(inst);
-                vaddrValid = true;
+                vaddrValid = false;
                 DPRINTF(PyMTL3, "executeLoad sn=%llu: using calculated vaddr=0x%llx (effAddr not valid)\n",
                         seq_num, vaddr);
             }
@@ -821,12 +814,7 @@ LSQUnitComparison::completeDataAccess(PacketPtr pkt)
         callCycle = curTick();  // 回退到 tick（不应该发生）
     }
 
-    // 2. 记录 C++ 的 DCache 调用
-    if (mockDCache && pkt) {
-        mockDCache->recordCPCall(callCycle, pkt, "completeDataAccess");
-    }
-
-    // 3. 发送 DCache 响应给 PyMTL3（Load 或 Store）
+    // 2. 发送 DCache 响应给 PyMTL3（Load 或 Store）
     // Load: needWB 为 true 时写回数据
     // Store: 总是需要通知完成（即使 needWB 为 false），以便 PyMTL3 从 queue 中移除
     if (pymtl3Available && pymtl3LSQ && !isSquashed) {
@@ -892,9 +880,8 @@ LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
     
     // 4. 只在请求真正被发送时才记录 DCache 调用
     // 注意：trySendPacket 可能返回 false（缓存端口忙），此时不应记录
-    // 另外，PyMTL3 的 dcache_req 只处理 store 写回（isLoad=false），
-    // 所以只记录 store 请求用于比较
-    if (ret && !isLoad && mockDCache && data_pkt) {
+    // 记录所有 DCache 请求（load 和 store）用于与 PyMTL3 比较
+    if (ret && mockDCache && data_pkt) {
         // 从 packet 的 senderState 获取指令 seqNum
         uint64_t seqNum = 0;
         if (data_pkt->senderState) {
@@ -904,6 +891,8 @@ LSQUnitComparison::trySendPacket(bool isLoad, PacketPtr data_pkt)
             }
         }
         mockDCache->recordCPCall(callCycle, data_pkt, "sendTimingReq", seqNum);
+        DPRINTF(PyMTL3, "trySendPacket %s sn=%llu: recorded DCache req at cycle=%llu addr=0x%llx\n",
+                isLoad ? "Load" : "Store", seqNum, callCycle, data_pkt->getAddr());
     }
 
     return ret;
